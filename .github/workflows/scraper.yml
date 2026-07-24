@@ -2,11 +2,11 @@ name: Hourly LinkedIn Job Alert
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs automatically at minute 0 of every hour
-  workflow_dispatch:     # Enables the "Run workflow" manual button in GitHub
+    - cron: '0 * * * *'  # Runs automatically every hour
+  workflow_dispatch:     # Enables manual "Run workflow" button
 
 permissions:
-  contents: write        # Gives GitHub permission to commit and save seen_jobs.txt
+  contents: write        # Required to save seen_jobs.txt back to GitHub
 
 jobs:
   scrape-jobs:
@@ -16,20 +16,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Install dependencies
         run: pip install requests beautifulsoup4
-
-      # --- DEBUG STEP ---
-      - name: Debug - List All Files
-        run: |
-          echo "=== Current Directory ==="
-          pwd
-          echo "=== Directory Contents (Recursive) ==="
-          ls -R
 
       - name: Run Job Scraper
         env:
@@ -41,6 +33,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          touch seen_jobs.txt
           git add seen_jobs.txt
           git commit -m "Updated seen jobs memory" || echo "No new jobs to save"
           git push
