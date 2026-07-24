@@ -9,6 +9,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 SEEN_JOBS_FILE = "seen_jobs.txt"
 
+
 def send_telegram_alert(job):
     """Sends a formatted message to your Telegram app."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -23,6 +24,7 @@ def send_telegram_alert(job):
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
     requests.post(url, data=data)
 
+
 def load_seen_jobs():
     """Loads previously seen job URLs to avoid duplicate alerts."""
     if os.path.exists(SEEN_JOBS_FILE):
@@ -30,15 +32,45 @@ def load_seen_jobs():
             return set(f.read().splitlines())
     return set()
 
+
 def save_seen_jobs(seen_urls):
-    """Saves job URLs so the bot remembers them for next hour."""
+    """Saves job URLs so the bot remembers them for next run."""
     with open(SEEN_JOBS_FILE, "w") as f:
         f.write("\n".join(seen_urls))
 
-def is_priority(job):
-    location = job["Location"].lower()
+
+def is_priority(job, job_card):
+    """Deep check for Chicago, Remote, and Remote synonyms across:
+
+    1. Job Title
+    2. Location text
+    3. URL link slug
+    4. Complete HTML card text (captures hidden LinkedIn badges & tags)
+    """
     title = job["Title"].lower()
-    return "chicago" in location or "remote" in location or "remote" in title
+    location = job["Location"].lower()
+    link = job["Link"].lower()
+
+    # Extract ALL text inside the HTML card snippet (badges, tags, metadata)
+    card_text = (
+        job_card.get_text(separator=" ", strip=True).lower() if job_card else ""
+    )
+
+    # Combine everything into one string to search across
+    combined_text = f"{title} {location} {link} {card_text}"
+
+    # 1. Check for Chicago
+    if "chicago" in combined_text:
+        return True
+
+    # 2. Check for Remote & common remote synonyms
+    remote_terms = ["remote", "work from home", "wfh", "telecommute", "virtual"]
+    for term in remote_terms:
+        if term in combined_text:
+            return True
+
+    return False
+
 
 def run_scraper():
     keywords = 'PMO OR "Project Management"'
@@ -47,18 +79,25 @@ def run_scraper():
     encoded_location = urllib.parse.quote(location)
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
         "Accept-Language": "en-US,en;q=0.9",
     }
 
     seen_urls = load_seen_jobs()
     new_jobs_found = False
 
-    # Check the first 2 pages (50 most recent jobs)
-    for page in range(2):
+    # Check 3 pages (~75 jobs max) for wider coverage
+    for page in range(3):
         start = page * 25
-        url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={encoded_keywords}&location={encoded_location}&f_TPR=r86400&sortBy=DD&start={start}"
-        
+        url = (
+            f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
+            f"keywords={encoded_keywords}&location={encoded_location}&f_TPR=r86400&sortBy=DD&start={start}"
+        )
+
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code != 200:
             break
@@ -71,39 +110,44 @@ def run_scraper():
         for job_card in cards:
             title_tag = job_card.find("h3", class_="base-search-card__title")
             company_tag = job_card.find("h4", class_="base-search-card__subtitle")
-            location_tag = job_card.find("span", class_="job-search-card__location")
+            location_tag = job_card.find(
+                "span", class_="job-search-card__location"
+            )
             link_tag = job_card.find("a", class_="base-card__full-link")
             time_tag = job_card.find("time")
 
             if title_tag and company_tag and link_tag:
                 clean_url = link_tag["href"].split("?")[0]
-                
-                # Check if we've already alerted about this job
+
+                # Skip if already alerted
                 if clean_url in seen_urls:
                     continue
 
                 job = {
                     "Title": title_tag.text.strip(),
                     "Company": company_tag.text.strip(),
-                    "Location": location_tag.text.strip() if location_tag else "N/A",
+                    "Location": (
+                        location_tag.text.strip() if location_tag else "N/A"
+                    ),
                     "Posted": time_tag.text.strip() if time_tag else "N/A",
                     "Link": clean_url,
                 }
 
-                # Only alert and save if it's a priority job
-                if is_priority(job):
+                # Comprehensive check for Chicago / Remote
+                if is_priority(job, job_card):
                     send_telegram_alert(job)
                     seen_urls.add(clean_url)
                     new_jobs_found = True
-                    time.sleep(1) # Prevent Telegram rate limits
+                    time.sleep(1)  # Prevent Telegram rate limits
 
-        time.sleep(2) # Prevent LinkedIn rate limits
+        time.sleep(2)  # Prevent LinkedIn rate limits
 
     if new_jobs_found:
         save_seen_jobs(seen_urls)
         print("Alerts sent and memory updated.")
     else:
-        print("No new priority jobs found this hour.")
+        print("No new priority jobs found this run.")
+
 
 if __name__ == "__main__":
     run_scraper()
