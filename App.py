@@ -5,8 +5,8 @@ from bs4 import BeautifulSoup
 import requests
 
 # Fetch secrets from GitHub Actions environment
-TELEGRAM_TOKEN = os.environ.get("8959937819:AAEGq0TTq0-yOOEl9ONhwKjqEuALT8x1iu4")
-TELEGRAM_CHAT_ID = os.environ.get("8544492663")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 SEEN_JOBS_FILE = "seen_jobs.txt"
 
 def send_telegram_alert(job):
