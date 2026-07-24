@@ -2,18 +2,18 @@ name: Hourly LinkedIn Job Alert
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs at minute 0 of every hour
-  workflow_dispatch:     # Adds a button to let you run it manually
+    - cron: '0 * * * *'  # Runs automatically at minute 0 of every hour
+  workflow_dispatch:     # Enables the "Run workflow" manual button in GitHub
 
 permissions:
-  contents: write        # Required to save the memory file back to GitHub
+  contents: write        # Gives GitHub permission to commit and save seen_jobs.txt
 
 jobs:
   scrape-jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -23,11 +23,19 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
+      # --- DEBUG STEP ---
+      - name: Debug - List All Files
+        run: |
+          echo "=== Current Directory ==="
+          pwd
+          echo "=== Directory Contents (Recursive) ==="
+          ls -R
+
       - name: Run Job Scraper
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python app.py  # Make sure this matches your script's filename!
+        run: python app.py
 
       - name: Save memory (seen jobs)
         run: |
