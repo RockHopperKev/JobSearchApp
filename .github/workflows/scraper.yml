@@ -35,5 +35,12 @@ jobs:
           git config --local user.name "GitHub Action"
           touch seen_jobs.txt
           git add seen_jobs.txt
-          git commit -m "Updated seen jobs memory" || echo "No new jobs to save"
-          git push
+          
+          # Only commit and push if seen_jobs.txt actually changed
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "Updated seen jobs memory"
+            git pull --rebase origin main
+            git push origin main
+          else
+            echo "No new jobs to save, skipping push."
+          fi
