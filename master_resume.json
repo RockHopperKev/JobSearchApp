@@ -1,0 +1,163 @@
+{
+  "candidate": {
+    "name": "Kevin George, PMP, ITILv3, ECBA",
+    "location": "Chicago, IL 60657",
+    "contact": {
+      "email": "kevpg44@gmail.com",
+      "linkedin": "linkedin.com/in/kgeorge08",
+      "work_authorization": "Authorized to work in the US and UK"
+    }
+  },
+  "tailoring_settings": {
+    "aggressiveness_slider_config": {
+      "1_to_3": "Strict Verification: Uses only verbatim metrics, named projects (JobNavi, Time & Projects, SailPoint, AWS migration), and explicit tools listed below. Rephrases bullet points to emphasize keywords but never introduces unlisted domains.",
+      "4_to_7": "Sensible Extrapolation: Pulls from the 'adjacent_experience_bank' to frame the candidate as having facilitated adjacent workstreams (e.g., Workday/SAP ERP implementations, Cloud Governance, Security Audits) within their existing $10M CPS, $6M Toyota, or Vodafone portfolios.",
+      "8_to_10": "Spec-Mirroring Mode: Directly incorporates the target job's exact methodologies, regulatory standards, and software platforms, framing portfolio governance as hands-on deployment of those specific enterprise systems to maximize ATS match."
+    }
+  },
+  "baseline_summary": "Enterprise PMO & Digital Transformation Leader with 15+ years of experience directing complex technology portfolios, cloud modernizations, and mission-critical operations across the US and UK. Proven track record of establishing PMO Centers of Excellence, governing multimillion-dollar operating budgets, and orchestrating cross-functional engineering teams. Specialized in turning strategic vision into executed reality—from delivering secure communications for the London 2012 Olympic Games and transitioning service operations for the UK's 5 largest airports, to modernizing infrastructure for 325,000+ users at CPS and driving $8M in annual portfolio efficiencies at Toyota.",
+  "core_competencies": [
+    "Enterprise PMO Leadership (CMMI-Level 5)",
+    "Portfolio Governance & Strategic Roadmaps",
+    "Product Ownership (Agile Scrum & SAFe)",
+    "Budget & IT Financial Management ($10M+ Portfolios)",
+    "Cloud & Application Modernization (AWS, IaaS, SaaS)",
+    "Identity & Access Management (SailPoint IGA/IAM)",
+    "Mission-Critical Infrastructure & Business Continuity",
+    "Process Standards & Accreditations (ISO/IEC 20000, ISO 9001)",
+    "Vendor RFPs, Contract Negotiations & SLA Management",
+    "Executive Steering Committee Facilitation & Reporting"
+  ],
+  "experience": [
+    {
+      "company": "Chicago Public Schools",
+      "role": "Enterprise PMO & Portfolio Manager",
+      "location": "Chicago, IL",
+      "dates": "Aug 2025 - Present",
+      "scope": "$10M+ annual investment, 40+ concurrent projects, 325,000+ users across 562 sites",
+      "achievements": [
+        "Direct the strategic IT project portfolio for the nation's 4th largest school district, prioritizing and executing high-impact programs including Generative AI, ERP modernization, and enterprise data analytics.",
+        "Architected an IT PMO Center of Excellence (CoE) roadmap toward CMMI-Level 5 maturity, standardizing SDLC methodologies and implementing enterprise tools (ServiceNow SPM, Azure DevOps).",
+        "Run the annual intake and prioritization process with executive leadership, using MoSCoW scoring to rank requests, allocate funding, and manage capital/operating expenditures for a $10M+ annual budget.",
+        "Cut average time to delivery by 20 weeks by designing and rolling out an Ultra Lean Project Lifecycle that streamlined administrative bottlenecks.",
+        "Built and led a high-performing team of 14 project managers, fostering collaborative relationships with executive sponsors and external partners.",
+        "Played a leadership role in a large-scale WAN redesign program to modernize network infrastructure and connectivity across 562 school and administrative sites.",
+        "Established automated Power BI reporting to provide the CIO, COO, and executive team with a unified monthly view of portfolio status, budget consumption, and risk mitigation plans."
+      ]
+    },
+    {
+      "company": "Toyota Motor North America, R&D",
+      "role": "R&D PMO, Product Owner & Senior Project Manager",
+      "location": "Ann Arbor, MI",
+      "dates": "Oct 2017 - Aug 2025",
+      "scope": "12+ major software deliveries annually, $6M+ budget oversight ($4M telecoms, $2M renewals), Scrum PO for 4 business groups (DS, PD, TSPO, TRINA)",
+      "named_projects": [
+        "JobNavi ($1.0M) Enterprise Workflow Platform",
+        "Time & Projects ($1.5M) Enterprise Time Tracking & PPM System",
+        "SailPoint Identity Governance & Administration (IAM/IGA) Migration",
+        "PHP to AWS Cloud Migration & Architecture Uplift",
+        "Product Development Technical Tools (PDTT) Modernization",
+        "Software License Visualization & Centralized Utilization Reporting",
+        "SOTI Mobile Device Management (MDM) & PD WiFi Modernization"
+      ],
+      "achievements": [
+        "Managed PMO governance across a portfolio of customer-facing digital platforms and enterprise technology initiatives, optimizing multi-million-dollar budgets to capture $8M in annual cost efficiencies.",
+        "Served as Product Owner for a dedicated Scrum team (5 developers), directing agile delivery of enterprise software applications supporting 4 core TMNA business groups.",
+        "Delivered enterprise-scale software initiatives including JobNavi ($1.0M) and Time & Projects ($1.5M), cutting delivery lead times by 30% by introducing low-code tools (Power Apps, Mendix).",
+        "Led critical cybersecurity and modernization programs, including an enterprise SailPoint IAM migration and migrating legacy PHP architectures to AWS cloud infrastructure.",
+        "Governed annual budgets exceeding $6M ($4M telecoms, $2M software renewals), reducing mobility spend by $396k annually and migrating code frameworks to save $180k per year.",
+        "Served as U.S. R&D lead on 3 joint international programs with Toyota Europe and Toyota Japan, aligning priorities, budgets, and release schedules across three regions.",
+        "Established the IT Operations Center of Excellence (CoE), reducing incident duration by 25% and designing the business continuity model that transitioned all Michigan R&D facilities to remote operations during COVID-19."
+      ]
+    },
+    {
+      "company": "Towergate Insurance",
+      "role": "Head of Service Desk, Incident & Problem Management (Contract)",
+      "location": "London, UK",
+      "dates": "Jul 2015 - Oct 2016",
+      "scope": "£2B turnover, 6,000 enterprise users, 100+ sites, managing transition of 20-person support organization",
+      "systems": [ "ServiceNow", "SAP", "Oracle", "OpenGI", "IaaS Virtual Server Hosting", "WAN Circuits" ],
+      "achievements": [
+        "Led a large-scale cloud and SaaS transformation program, transitioning legacy data and applications to reduce operating costs by $5M annually.",
+        "Executed an enterprise application rationalization initiative, reducing the portfolio from 2,500 to 230 applications (91% reduction) to eliminate redundant licensing and simplify support.",
+        "Governed enterprise application modernization touching SAP, Oracle, and ServiceNow, ensuring continuous SLA adherence during supplier transition to an external managed service provider.",
+        "Designed an executive KPI framework and service catalog set against ITIL-defined severity levels, improving first-time-fix rates and ticket routing accuracy."
+      ]
+    },
+    {
+      "company": "FCO Services (UK Foreign & Commonwealth Office)",
+      "role": "Head of Incident Management & Service Desk (Contract)",
+      "location": "Milton Keynes, UK",
+      "dates": "Oct 2014 - Jun 2015",
+      "scope": "Global secure infrastructure supporting 250+ embassies, high commissions, and consulates across 160 countries",
+      "achievements": [
+        "Designed and implemented an Incident Management governance framework that achieved formal ISO 9001 certification following external audit.",
+        "Recruited, trained, and managed a high-performing incident management team of 5 staff within a highly secure government environment.",
+        "Decreased incident ticket volumes by 30% through structured root cause analysis, trend identification, and introduction of an emergency RFC change governance process.",
+        "Engineered a critical business communication system (including rapid SMS broadcasting) to enhance executive operational awareness during major incidents."
+      ]
+    },
+    {
+      "company": "Three (H3G)",
+      "role": "Incident and Change Management Consultant (Contract)",
+      "location": "Reading, UK",
+      "dates": "Mar 2014 - Oct 2014",
+      "scope": "£348M operating profit, 4,500 IT users, 300+ locations, nationwide telco infrastructure",
+      "systems": [ "Cisco Networks", "IMS Core Network", "HP OpenView", "OSS/BSS", "CRM Billing" ],
+      "achievements": [
+        "Governed 24/7 incident and emergency change management processes across nationwide telecommunications network infrastructure.",
+        "Visualized real-time KPI metrics on operations center dashboards, improving incident turnaround times and contributing to a Net Promoter Score (NPS) increase from 13 to 17.",
+        "Facilitated the operational insourcing of IT services, authoring standard operating procedures and conducting technical knowledge transfer across distributed engineering teams."
+      ]
+    },
+    {
+      "company": "Vodafone",
+      "role": "Service Center Manager",
+      "location": "Rugby, UK",
+      "dates": "May 2010 - Mar 2014",
+      "scope": "24/7 operations, Airwave Solutions UK emergency services network contract, London 2012 Olympics, 5 UK airports",
+      "systems": [ "TETRA Network", "Motorola Mobile Technology", "WAN Circuits", "BMC Remedy ITSM" ],
+      "achievements": [
+        "Directed a 24/7 service center of incident, problem, and service desk staff supporting Airwave Solutions—the mission-critical communications network for all UK police, fire, and ambulance services.",
+        "Led incident, problem, and emergency change management for all mission-critical communications infrastructure used by emergency service responders during the London 2012 Olympic Games.",
+        "Spearheaded operational service transition across the 5 largest commercial airports in the UK (including London Heathrow and Gatwick), standardizing workflows and supplier agreements.",
+        "Authored the complete operational process framework that achieved formal ISO/IEC 20000 certification in 2013.",
+        "Achieved Vodafone's highest corporate global performance rating in 2013 for operational resilience and customer satisfaction."
+      ]
+    }
+  ],
+  "education": {
+    "degree": "BSc (Hons), Sports Therapy",
+    "institution": "London Metropolitan University",
+    "location": "London, UK",
+    "diploma": "BTEC National Diploma in Sports Science (MK College, UK)"
+  },
+  "certifications": [
+    "PMP (Project Management Professional) - PMI (Active through June 2029)",
+    "IIBA ECBA (Entry Certificate in Business Analysis)",
+    "ITIL v3 Foundation",
+    "ISO/IEC 20000 & ISO 9001 Process Framework Lead",
+    "Architecting on AWS (Amazon Web Services)",
+    "MCDST (Microsoft Certified Desktop Support Technician)",
+    "Emerging Technology Leaders Program (Stellar)",
+    "Diploma in Leadership & Management (Shaw Academy)",
+    "Complete Python Bootcamp (Peirian)"
+  ],
+  "technical_toolkit": {
+    "ppm_and_delivery": [ "ServiceNow (incl. SPM)", "Jira", "Azure DevOps", "Microsoft Project", "Planview", "Clarity", "Smartsheet" ],
+    "enterprise_software_and_erp": [ "SAP", "Oracle", "OpenGI", "SailPoint (IAM/IGA)", "SOTI MDM", "BMC Remedy", "HP OpenView" ],
+    "cloud_and_infrastructure": [ "AWS (EC2, S3, Architecture)", "IaaS Virtual Server Hosting", "WAN/LAN Circuits", "Active Directory", "Cisco" ],
+    "data_and_analytics": [ "Power BI", "SQL", "Excel (Advanced)", "LucidChart", "Figma" ],
+    "automation_and_development": [ "Power Apps", "Power Automate", "Mendix", "Python", "DevOps CI/CD", "GitHub" ],
+    "ai_and_collaboration": [ "Gemini", "ChatGPT", "Claude", "SharePoint", "Teams", "Confluence", "Miro" ]
+  },
+  "adjacent_experience_bank": [
+    "Enterprise ERP/CRM Transformations (SAP, Oracle, Workday, Salesforce) PMO leadership",
+    "Cloud migration governance (AWS/Azure) and hybrid infrastructure modernization",
+    "Identity & Access Governance (SailPoint, Okta, Active Directory) security implementations",
+    "Mission-critical infrastructure, 24/7 high-availability operations, and disaster recovery planning",
+    "Regulatory compliance and formal auditing (ISO 20000, ISO 9001, CMMI-Level 5)",
+    "CapEx/OpEx financial forecasting, vendor RFP procurement, and SOW lifecycle management",
+    "Organizational change management (Prosci/ADKAR) and business continuity planning"
+  ]
+}
