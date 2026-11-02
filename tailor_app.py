@@ -180,8 +180,11 @@ Ann Arbor, MI | Oct 2017 - Aug 2025
 
 
 def generate_tailored_resume_gemini(prompt):
-    """Calls Gemini API using the current gemini-3.8-flash model."""
-    # Retrieve the API key from Streamlit Secrets or Environment
+    """Calls Gemini API using Google's Interactions API for gemini-3.8-flash,
+
+    with generate_content fallback (sampling parameters omitted for Gemini
+    3.x).
+    """
     api_key = None
     if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
         api_key = str(st.secrets["GEMINI_API_KEY"])
@@ -191,7 +194,6 @@ def generate_tailored_resume_gemini(prompt):
     if not api_key:
         return "ERROR: `GEMINI_API_KEY` was not found. Please add it to your Streamlit Cloud App Secrets."
 
-    # Clean whitespace or stray quotes
     api_key = api_key.strip().strip('"').strip("'")
 
     try:
@@ -199,8 +201,23 @@ def generate_tailored_resume_gemini(prompt):
     except Exception as e:
         return f"ERROR: Failed to initialize Gemini client: {e}"
 
-    # Models to try in order of preference
-    candidate_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-pro"]
+    # Method 1: Interactions API (primary interface for gemini-3.8-flash)
+    try:
+        if hasattr(client, "interactions"):
+            interaction = client.interactions.create(
+                model="gemini-3.8-flash", input=prompt
+            )
+            if hasattr(interaction, "output_text") and interaction.output_text:
+                return interaction.output_text
+    except Exception:
+        pass  # Fall through to generate_content if interactions API is unavailable
+
+    # Method 2: generate_content fallback (temperature omitted to avoid 400 validation errors)
+    candidate_models = [
+        "gemini-3.8-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+    ]
     last_error = None
 
     for model_name in candidate_models:
@@ -208,9 +225,6 @@ def generate_tailored_resume_gemini(prompt):
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3,
-                ),
             )
             if response and response.text:
                 return response.text
