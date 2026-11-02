@@ -235,30 +235,60 @@ class ATSResumePDF(FPDF):
         pass  # Omit running headers that trip ATS scanners
 
 
+def clean_text_for_pdf(text: str) -> str:
+    """Replaces Unicode typographical symbols with standard ATS/Latin-1 characters."""
+    replacements = {
+        "\u2014": " - ",  # em-dash (—)
+        "\u2013": "-",  # en-dash (–)
+        "\u2015": " - ",  # horizontal bar
+        "\u2018": "'",  # curly left single quote (‘)
+        "\u2019": "'",  # curly right single quote (’)
+        "\u201c": '"',  # curly left double quote (“)
+        "\u201d": '"',  # curly right double quote (”)
+        "\u2022": "-",  # bullet point (•)
+        "\u2026": "...",  # ellipsis (…)
+        "\u00a0": " ",  # non-breaking space
+        "\u2010": "-",  # hyphen
+        "\u2011": "-",  # non-breaking hyphen
+        "\u00b7": "-",  # middle dot
+    }
+    for bad_char, good_char in replacements.items():
+        text = text.replace(bad_char, good_char)
+
+    # Encode to latin-1, replacing any other unmapped foreign characters safely
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+class ATSResumePDF(FPDF):
+
+    def header(self):
+        pass
+
+
 def compile_resume_to_pdf(markdown_text):
     """Compiles Markdown text into a clean, single-column, ATS-compliant PDF."""
     pdf = ATSResumePDF(format="letter", unit="pt")
 
-    # Set margins BEFORE adding the first page so coordinate origins align
     pdf.set_margins(36, 36, 36)
     pdf.set_auto_page_break(auto=True, margin=36)
     pdf.add_page()
 
-    # Calculate exact printable text width: 612pt - 72pt margins = 540pt
     content_width = (
         pdf.epw
         if hasattr(pdf, "epw")
         else (pdf.w - pdf.l_margin - pdf.r_margin)
     )
 
-    lines = markdown_text.split("\n")
+    # Sanitize the entire text before splitting into lines
+    clean_markdown = clean_text_for_pdf(markdown_text)
+
+    lines = clean_markdown.split("\n")
     for raw_line in lines:
         line = raw_line.strip()
         if not line:
             pdf.ln(3)
             continue
 
-        # Force cursor back to left margin at the start of every line
         pdf.set_x(pdf.l_margin)
 
         # 1. Main Header / Candidate Name (#)
@@ -305,7 +335,6 @@ def compile_resume_to_pdf(markdown_text):
                 new_y="NEXT",
             )
 
-            # Clean separator line spanning exact content width
             line_y = pdf.get_y()
             pdf.set_draw_color(180, 180, 180)
             pdf.set_line_width(0.75)
@@ -331,7 +360,6 @@ def compile_resume_to_pdf(markdown_text):
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(30, 30, 30)
             bullet_body = line[2:].strip()
-            # Uses markdown=True so **bold** keywords render natively in bold
             pdf.multi_cell(
                 content_width,
                 12.5,
