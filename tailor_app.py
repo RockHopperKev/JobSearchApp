@@ -375,9 +375,27 @@ def clean_text_for_pdf(text: str) -> str:
 
 
 class ATSResumePDF(FPDF):
-
     def header(self):
         pass
+
+
+def safe_cell(pdf, w, h, txt, align="L"):
+    try:
+        pdf.cell(w, h, txt, align=align, new_x="LMARGIN", new_y="NEXT")
+    except TypeError:
+        pdf.cell(w, h, txt, ln=1, align=align)
+
+
+def safe_multi_cell(pdf, w, h, txt):
+    try:
+        pdf.multi_cell(w, h, txt, markdown=True, new_x="LMARGIN", new_y="NEXT")
+    except TypeError:
+        try:
+            pdf.multi_cell(w, h, txt, markdown=True)
+            pdf.set_x(pdf.l_margin)
+        except TypeError:
+            pdf.multi_cell(w, h, txt)
+            pdf.set_x(pdf.l_margin)
 
 
 def compile_resume_to_pdf(markdown_text):
@@ -406,40 +424,20 @@ def compile_resume_to_pdf(markdown_text):
             pdf.set_font("Helvetica", "B", 14)
             pdf.set_text_color(20, 20, 20)
             clean_name = line.replace("# ", "").replace("*", "")
-            pdf.cell(
-                content_width,
-                18,
-                clean_name,
-                align="C",
-                new_x="LMARGIN",
-                new_y="NEXT",
-            )
+            safe_cell(pdf, content_width, 18, clean_name, align="C")
             pdf.ln(1)
         elif "@" in line and "|" in line:
             pdf.set_font("Helvetica", "", 8.5)
             pdf.set_text_color(70, 70, 70)
             clean_contact = line.replace("*", "")
-            pdf.cell(
-                content_width,
-                12,
-                clean_contact,
-                align="C",
-                new_x="LMARGIN",
-                new_y="NEXT",
-            )
+            safe_cell(pdf, content_width, 12, clean_contact, align="C")
             pdf.ln(3)
         elif line.startswith("## "):
             pdf.ln(4)
             pdf.set_font("Helvetica", "B", 10)
             pdf.set_text_color(0, 0, 0)
             clean_title = line.replace("## ", "").replace("*", "").upper()
-            pdf.cell(
-                content_width,
-                13,
-                clean_title,
-                new_x="LMARGIN",
-                new_y="NEXT",
-            )
+            safe_cell(pdf, content_width, 13, clean_title, align="L")
             line_y = pdf.get_y()
             pdf.set_draw_color(180, 180, 180)
             pdf.set_line_width(0.75)
@@ -450,36 +448,16 @@ def compile_resume_to_pdf(markdown_text):
             pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(20, 20, 20)
             clean_subhead = line.replace("### ", "").replace("*", "")
-            pdf.cell(
-                content_width,
-                12,
-                clean_subhead,
-                new_x="LMARGIN",
-                new_y="NEXT",
-            )
+            safe_cell(pdf, content_width, 12, clean_subhead, align="L")
         elif line.startswith(("- ", "* ")):
             pdf.set_font("Helvetica", "", 8.5)
             pdf.set_text_color(30, 30, 30)
             bullet_body = line[2:].strip()
-            pdf.multi_cell(
-                content_width,
-                11.5,
-                f"  -  {bullet_body}",
-                markdown=True,
-                new_x="LMARGIN",
-                new_y="NEXT",
-            )
+            safe_multi_cell(pdf, content_width, 11.5, f"  -  {bullet_body}")
         else:
             pdf.set_font("Helvetica", "", 8.5)
             pdf.set_text_color(30, 30, 30)
-            pdf.multi_cell(
-                content_width,
-                11.5,
-                line,
-                markdown=True,
-                new_x="LMARGIN",
-                new_y="NEXT",
-            )
+            safe_multi_cell(pdf, content_width, 11.5, line)
 
     return bytes(pdf.output())
 
@@ -500,13 +478,13 @@ col_left, col_right = st.columns([1, 1], gap="medium")
 
 with col_left:
     st.subheader("1. Target Job Source")
-
-    # Read job_url passed from Telegram deep link (if present)
+    
+    # Read incoming URL parameter from Telegram deep link
     url_from_params = st.query_params.get("job_url", "")
 
-    # Auto-fetch if opened directly from Telegram and not yet loaded
+    # Auto-fetch if the page was opened directly via Telegram link and not yet parsed
     if url_from_params and "job_spec" not in st.session_state:
-        with st.spinner("Loading job details from Telegram link..."):
+        with st.spinner("Auto-fetching job spec from link..."):
             job_data, err = fetch_linkedin_job_details(url_from_params)
             if not err:
                 st.session_state["job_spec"] = job_data
@@ -587,6 +565,7 @@ with col_left:
                     st.error(generated_text)
                 else:
                     st.session_state["tailored_markdown"] = generated_text
+                    st.session_state["has_tailored"] = True
                     st.success("Draft ready for review!")
 
 with col_right:
@@ -614,16 +593,27 @@ with col_right:
             value=st.session_state["tailored_markdown"],
             height=540,
         )
-        # Keep session state synced with edits
         st.session_state["tailored_markdown"] = user_approved_markdown
 
     st.subheader("4. Export ATS-Compliant PDF")
+    
+    is_tailored = st.session_state.get("has_tailored", False) or st.session_state.get("tailored_markdown") != ORIGINAL_RESUME_TEMPLATE
+    
+    if not is_tailored:
+        st.warning(
+            "⚠️ You are viewing the default baseline resume. Tap **'⚡ Generate Tailored Resume'** above before downloading."
+        )
+        
     try:
         pdf_bytes = compile_resume_to_pdf(st.session_state["tailored_markdown"])
         safe_company = "".join(
             c for c in job_company if c.isalnum() or c in (" ", "_")
         ).rstrip()
-        filename = f"Kevin_George_{safe_company.replace(' ', '_')}_Resume.pdf"
+        filename = (
+            f"Kevin_George_{safe_company.replace(' ', '_')}_Resume.pdf"
+            if safe_company
+            else "Kevin_George_Resume.pdf"
+        )
 
         st.download_button(
             label=f"📥 Download {filename}",
@@ -631,6 +621,7 @@ with col_right:
             file_name=filename,
             mime="application/pdf",
             type="primary",
+            disabled=not is_tailored,
         )
     except Exception as e:
         st.error(f"Error compiling PDF: {e}")
