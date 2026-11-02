@@ -180,21 +180,45 @@ Ann Arbor, MI | Oct 2017 - Aug 2025
 
 
 def generate_tailored_resume_gemini(prompt):
-    """Calls Gemini API using google-genai client."""
-    api_key = os.environ.get("GEMINI_API_KEY")
+    """Calls Gemini API using the current gemini-3.8-flash model."""
+    # Retrieve the API key from Streamlit Secrets or Environment
+    api_key = None
+    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+        api_key = str(st.secrets["GEMINI_API_KEY"])
+    elif "GEMINI_API_KEY" in os.environ:
+        api_key = os.environ.get("GEMINI_API_KEY")
+
     if not api_key:
-        return "ERROR: GEMINI_API_KEY environment variable not set. Please set it in your environment or terminal."
+        return "ERROR: `GEMINI_API_KEY` was not found. Please add it to your Streamlit Cloud App Secrets."
 
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.3,  # Keep output grounded and structured
-        ),
-    )
-    return response.text
+    # Clean whitespace or stray quotes
+    api_key = api_key.strip().strip('"').strip("'")
 
+    try:
+        client = genai.Client(api_key=api_key)
+    except Exception as e:
+        return f"ERROR: Failed to initialize Gemini client: {e}"
+
+    # Models to try in order of preference
+    candidate_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-pro"]
+    last_error = None
+
+    for model_name in candidate_models:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                ),
+            )
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            last_error = e
+            continue
+
+    return f"ERROR: Gemini API call failed: {last_error}"
 
 # ---------------------------------------------------------
 # 4. ATS-OPTIMIZED PDF GENERATOR
