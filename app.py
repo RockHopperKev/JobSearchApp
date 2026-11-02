@@ -10,8 +10,15 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 SEEN_JOBS_FILE = "seen_jobs.txt"
 
 
+# Replace with your actual live Streamlit app URL
+STREAMLIT_APP_URL = "https://jobsearchapp-figoj6etchhhoaopoxrmqp.streamlit.app/"
+
+
 def send_telegram_alert(job):
-    """Sends a formatted message to your Telegram app."""
+    """Sends a formatted message to your Telegram app with 1-click tailoring link."""
+    encoded_job_url = urllib.parse.quote(job["Link"])
+    tailor_link = f"{STREAMLIT_APP_URL}?job_url={encoded_job_url}"
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     message = (
         f"🚨 <b>NEW PRIORITY JOB</b> 🚨\n\n"
@@ -19,7 +26,8 @@ def send_telegram_alert(job):
         f"🏢 {job['Company']}\n"
         f"📍 {job['Location']}\n"
         f"🕒 {job['Posted']}\n\n"
-        f"<a href='{job['Link']}'>🔗 Apply Here</a>"
+        f"<a href='{job['Link']}'>🔗 View on LinkedIn</a> | "
+        f"<a href='{tailor_link}'>📄 <b>Tailor Resume</b></a>"
     )
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
     requests.post(url, data=data)
