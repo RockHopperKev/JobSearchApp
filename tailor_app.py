@@ -21,8 +21,14 @@ MASTER_RESUME_FILE = "master_resume.json"
 
 def load_master_resume():
     if os.path.exists(MASTER_RESUME_FILE):
-        with open(MASTER_RESUME_FILE, "r") as f:
-            return json.load(f)
+        try:
+            # Handles standard UTF-8 as well as Windows UTF-8 with BOM
+            with open(MASTER_RESUME_FILE, "r", encoding="utf-8-sig") as f:
+                return json.load(f)
+        except UnicodeDecodeError:
+            # Fallback for Windows CP1252 / Latin-1 encoded text
+            with open(MASTER_RESUME_FILE, "r", encoding="latin-1") as f:
+                return json.load(f)
     return None
 
 
