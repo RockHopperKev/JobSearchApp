@@ -229,12 +229,27 @@ class ATSResumePDF(FPDF):
         pass  # Omit decorative running headers that disrupt ATS parsers
 
 
+class ATSResumePDF(FPDF):
+
+    def header(self):
+        pass  # Omit running headers that trip ATS scanners
+
+
 def compile_resume_to_pdf(markdown_text):
     """Compiles Markdown text into a clean, single-column, ATS-compliant PDF."""
     pdf = ATSResumePDF(format="letter", unit="pt")
+
+    # Set margins BEFORE adding the first page so coordinate origins align
+    pdf.set_margins(36, 36, 36)
     pdf.set_auto_page_break(auto=True, margin=36)
     pdf.add_page()
-    pdf.set_margins(36, 36, 36)
+
+    # Calculate exact printable text width: 612pt - 72pt margins = 540pt
+    content_width = (
+        pdf.epw
+        if hasattr(pdf, "epw")
+        else (pdf.w - pdf.l_margin - pdf.r_margin)
+    )
 
     lines = markdown_text.split("\n")
     for raw_line in lines:
@@ -243,48 +258,101 @@ def compile_resume_to_pdf(markdown_text):
             pdf.ln(3)
             continue
 
-        # Header / Name (#)
+        # Force cursor back to left margin at the start of every line
+        pdf.set_x(pdf.l_margin)
+
+        # 1. Main Header / Candidate Name (#)
         if line.startswith("# "):
             pdf.set_font("Helvetica", "B", 15)
             pdf.set_text_color(20, 20, 20)
-            pdf.cell(0, 20, line.replace("# ", ""), ln=True, align="C")
+            clean_name = line.replace("# ", "").replace("*", "")
+            pdf.cell(
+                content_width,
+                20,
+                clean_name,
+                align="C",
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
             pdf.ln(1)
-        # Subheaders / Contact info directly below name
+
+        # 2. Contact Information Line
         elif "@" in line and "|" in line:
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(80, 80, 80)
-            pdf.cell(0, 13, line, ln=True, align="C")
-            pdf.ln(4)
-        # Section Titles (##)
+            clean_contact = line.replace("*", "")
+            pdf.cell(
+                content_width,
+                13,
+                clean_contact,
+                align="C",
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+            pdf.ln(3)
+
+        # 3. Section Titles (##)
         elif line.startswith("## "):
-            pdf.ln(6)
+            pdf.ln(5)
             pdf.set_font("Helvetica", "B", 10.5)
             pdf.set_text_color(0, 0, 0)
-            clean_title = line.replace("## ", "").upper()
-            pdf.cell(0, 15, clean_title, ln=True)
-            # Thin divider rule
+            clean_title = line.replace("## ", "").replace("*", "").upper()
+            pdf.cell(
+                content_width,
+                14,
+                clean_title,
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+
+            # Clean separator line spanning exact content width
+            line_y = pdf.get_y()
             pdf.set_draw_color(180, 180, 180)
             pdf.set_line_width(0.75)
-            pdf.line(pdf.get_x(), pdf.get_y(), pdf.w - 36, pdf.get_y())
+            pdf.line(pdf.l_margin, line_y, pdf.w - pdf.r_margin, line_y)
             pdf.ln(4)
-        # Job Roles / Headings (###)
+
+        # 4. Job Titles / Company Subheadings (###)
         elif line.startswith("### "):
             pdf.ln(3)
             pdf.set_font("Helvetica", "B", 9.5)
             pdf.set_text_color(20, 20, 20)
-            pdf.cell(0, 13, line.replace("### ", ""), ln=True)
-        # Bullet points
+            clean_subhead = line.replace("### ", "").replace("*", "")
+            pdf.cell(
+                content_width,
+                13,
+                clean_subhead,
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+
+        # 5. Bullet Points
         elif line.startswith(("- ", "* ")):
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(30, 30, 30)
-            clean_bullet = line[2:]
-            # Standard ASCII bullet point for universal ATS compatibility
-            pdf.multi_cell(0, 12.5, f"  -  {clean_bullet}")
-        # Standard paragraph body
+            bullet_body = line[2:].strip()
+            # Uses markdown=True so **bold** keywords render natively in bold
+            pdf.multi_cell(
+                content_width,
+                12.5,
+                f"  -  {bullet_body}",
+                markdown=True,
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+
+        # 6. Standard Paragraph / Earlier Career Lines
         else:
             pdf.set_font("Helvetica", "", 9)
             pdf.set_text_color(30, 30, 30)
-            pdf.multi_cell(0, 12.5, line)
+            pdf.multi_cell(
+                content_width,
+                12.5,
+                line,
+                markdown=True,
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
 
     return bytes(pdf.output())
 
