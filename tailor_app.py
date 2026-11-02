@@ -1,11 +1,10 @@
-import io
+import difflib
 import json
 import os
 import re
 from bs4 import BeautifulSoup
 from fpdf import FPDF
 from google import genai
-from google.genai import types
 import requests
 import streamlit as st
 
@@ -14,7 +13,50 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# 1. LOAD MASTER RESUME DATA
+# 1. BASELINE ORIGINAL RESUME TEMPLATE (PERMANENT STARTING POINT)
+# ---------------------------------------------------------
+ORIGINAL_RESUME_TEMPLATE = """# KEVIN GEORGE, PMP
+Chicago, IL 60657 | kevpg44@gmail.com | linkedin.com/in/kgeorge08 | Authorized to work in the US and UK
+
+## SUMMARY
+Enterprise PMO leader with 9 years running technology portfolios across the US and UK. At Chicago Public Schools, cut average time to delivery by 20 weeks while giving the CIO and COO one monthly view of status, budget and risk. Previously delivered 12 major software projects a year for Toyota R&D and led joint programs spanning the US, Europe and Japan.
+
+## CORE CAPABILITIES
+- **Leadership & governance**: Enterprise PMO Leadership, Portfolio Governance & Prioritization, Team Leadership, Stakeholder Alignment
+- **Investment & reporting**: Budget & Investment Planning, Executive Reporting
+- **Delivery**: Agile / Scrum/SAFe/Hybrid, Lean Project Lifecycle Design, Vendor & Partner Management
+
+## PROFESSIONAL EXPERIENCE
+### Chicago Public Schools | Enterprise PMO & Portfolio Manager
+Chicago, IL | Aug 2025 - Present
+- Cut average time to delivery by 20 weeks by designing and rolling out an Ultra Lean Project Lifecycle that also reduced administrative work.
+- Direct $10M+ in annual investment across about 40 projects serving 562 schools and district offices, running the annual intake with executive leadership and using MOSCOW scoring to rank requests and allocate funding.
+- Give executives one monthly view of status, budget and risk through Power BI reporting built from scratch; present it to the CIO and COO quarterly.
+- Lead and coach 14 project managers, setting district-wide standards for how projects are planned, tracked and closed.
+
+### Toyota | R&D PMO & Project Manager
+Ann Arbor, MI | Oct 2017 - Aug 2025
+- Delivered 12 major software projects a year as the PMO for all Toyota R&D software development.
+- Cut delivery time by 30% by introducing low-code tools (Power Apps and Mendix) to build custom project and approval apps.
+- Led U.S. R&D on 3 joint projects with Toyota Europe and Toyota Japan, aligning priorities, budgets and release schedules across three regions, including on-site collaboration in Japan.
+- Ran Scrum delivery across 3 teams of in-house and vendor staff building vehicle prototype design applications, managing a $2M+ annual budget.
+
+### Earlier Career (2014 - 2016)
+- **Project Lead, Towergate (2015-2016)**: Cut the business application portfolio from 2,500 to 230 apps (91%) by consolidating and removing low-value licensing.
+- **Team Lead, FCO Services (2014-2015)**: Led a 5-person incident management team within the UK Foreign & Commonwealth Office.
+- **Incident Manager, THREE / H3G (2014)**: Managed major incidents on the nationwide mobile network.
+
+## CERTIFICATIONS & EDUCATION
+- **Certifications**: PMP (exp. June 2029) | IIBA ECBA | ITIL v3 Foundation | Leadership & Management Diploma | Emerging Technology Leaders Program
+- **Education**: BSc, Sports Medicine London, UK
+
+## TOOLS & TECHNOLOGY
+- **Portfolio & delivery**: Microsoft Project, Planview, Clarity, ServiceNow (incl. SPM), Smartsheet, Jira, Azure DevOps
+- **Reporting & collaboration**: Power BI, Excel, SharePoint, Teams, Confluence, Miro, Figma
+- **Low-code & AI**: Power Apps, Mendix, Gemini, ChatGPT, Claude"""
+
+# ---------------------------------------------------------
+# 2. LOAD MASTER RESUME DATA
 # ---------------------------------------------------------
 MASTER_RESUME_FILE = "master_resume.json"
 
@@ -22,11 +64,9 @@ MASTER_RESUME_FILE = "master_resume.json"
 def load_master_resume():
     if os.path.exists(MASTER_RESUME_FILE):
         try:
-            # Handles standard UTF-8 as well as Windows UTF-8 with BOM
             with open(MASTER_RESUME_FILE, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         except UnicodeDecodeError:
-            # Fallback for Windows CP1252 / Latin-1 encoded text
             with open(MASTER_RESUME_FILE, "r", encoding="latin-1") as f:
                 return json.load(f)
     return None
@@ -34,8 +74,12 @@ def load_master_resume():
 
 master_data = load_master_resume()
 
+# Initialize session state with baseline template
+if "tailored_markdown" not in st.session_state:
+    st.session_state["tailored_markdown"] = ORIGINAL_RESUME_TEMPLATE
+
 # ---------------------------------------------------------
-# 2. JOB SCRAPER (LINKEDIN GUEST ENDPOINT)
+# 3. JOB SCRAPER (LINKEDIN GUEST ENDPOINT)
 # ---------------------------------------------------------
 HEADERS = {
     "User-Agent": (
@@ -48,7 +92,6 @@ HEADERS = {
 
 
 def fetch_linkedin_job_details(job_url):
-    """Extracts job title, company, and full description from LinkedIn guest API."""
     match = re.search(r"(\d{8,})", job_url)
     if not match:
         return None, "Could not find a valid numerical Job ID in the URL."
@@ -89,47 +132,47 @@ def fetch_linkedin_job_details(job_url):
 
 
 # ---------------------------------------------------------
-# 3. PROMPT GENERATION ENGINE (1-10 SLIDER LOGIC)
+# 4. PROMPT ENGINE (LOCKING BASELINE TEMPLATE + SLIDER)
 # ---------------------------------------------------------
 def build_tailoring_prompt(job_spec, master_json, aggressiveness):
     slider_rules = ""
-
     if 1 <= aggressiveness <= 3:
         slider_rules = """
 AGGRESSIVENESS LEVEL: LOW (Strict Truthfulness - Level {lvl}/10)
-- Rely ONLY on the companies, dates, certifications, tools, and metrics explicitly present in the Master Resume.
-- Do NOT introduce any software, methodology, or domain not already documented.
-- Highlight match by prioritizing matching achievements and mirroring phrasing only where directly supported by the candidate's history.
+- Rely strictly on the metrics, tools, and roles in the Baseline Template and Master Resume.
+- Do NOT introduce unverified software or frameworks.
+- Re-order competencies and emphasize existing bullet points to match target keywords.
 """.format(
             lvl=aggressiveness
         )
     elif 4 <= aggressiveness <= 7:
         slider_rules = """
 AGGRESSIVENESS LEVEL: BALANCED (Sensible Extrapolation - Level {lvl}/10)
-- Retain exact companies, job titles, employment dates, and core metrics ($10M budget, 14 PMs, $8M savings, ISO accreditations).
-- You MAY draw from the 'adjacent_experience_bank' and weave those capabilities into Chicago Public Schools and Toyota bullet points.
-- If the posting demands specific PMO responsibilities (e.g., Workday rollout governance, Cloud migration, RFP vendor selection, OCM/Change Management), frame Kevin's leadership across those workstreams within his existing projects.
-- Mention familiarity with target tools if adjacent to Kevin's stack (e.g., Jira/Azure DevOps -> Linear/Asana; ServiceNow SPM -> Workfront).
+- Retain exact companies, titles, dates, and core metrics ($10M budget, 14 PMs, $8M savings, 20 weeks saved).
+- Draw from the 'adjacent_experience_bank' in the Master Resume to tailor bullets for Toyota and Chicago Public Schools.
+- If the posting asks for adjacent PMO responsibilities (e.g., ERP/Workday governance, cloud migration, RFP vendor selection, OCM), frame Kevin's delivery across those workstreams.
 """.format(
             lvl=aggressiveness
         )
     else:
         slider_rules = """
-AGGRESSIVENESS LEVEL: MAXIMUM (Complete Spec-Mirroring - Level {lvl}/10)
-- Tailor the resume aggressively to maximize ATS keyword scoring.
-- Incorporate the target job description's primary methodologies, platforms, and vocabulary verbatim into the Summary, Core Competencies, and Experience bullets.
-- If the job requires specific enterprise platforms (e.g., Workday, SAP S/4HANA, Salesforce, AWS Cloud), position Kevin's portfolio management and delivery governance at Toyota and CPS around those initiatives.
-- Ensure all major requirements from the posting appear directly in the resume text.
+AGGRESSIVENESS LEVEL: MAXIMUM (Full Keyword & Spec-Mirroring - Level {lvl}/10)
+- Aggressively tailor the resume to maximize ATS keyword scoring.
+- Incorporate the target job description's primary methodologies, platforms, and required qualifications directly into the Summary, Core Capabilities, and Experience bullets.
+- Position Kevin's leadership at Toyota and CPS directly around the required enterprise platforms (e.g., Workday, SAP, AWS).
 """.format(
             lvl=aggressiveness
         )
 
     system_prompt = f"""
-You are an executive resume writer and ATS optimization specialist for Enterprise PMO and Project Management leaders.
+You are an executive resume writer and ATS optimization specialist for Enterprise PMO and Senior Project Management leaders.
 
 {slider_rules}
 
-CANDIDATE MASTER RESUME DATA:
+CANDIDATE BASELINE TEMPLATE (YOU MUST PRESERVE THIS EXACT STRUCTURE AND FORMATTING):
+{ORIGINAL_RESUME_TEMPLATE}
+
+FULL CAREER MASTER DATA (FOR ACCURATE FACTS & CONTEXT):
 {json.dumps(master_json, indent=2)}
 
 TARGET JOB SPECIFICATION:
@@ -138,53 +181,22 @@ Company: {job_spec.get('company', '')}
 Description:
 {job_spec.get('description', '')}
 
-OUTPUT REQUIREMENTS:
-Output ONLY clean Markdown formatted text with these exact sections:
-# KEVIN GEORGE, PMP
-Chicago, IL 60657 | kevpg44@gmail.com | linkedin.com/in/kgeorge08 | Authorized to work in the US and UK
-
-## PROFESSIONAL SUMMARY
-[3-4 punchy sentences tailoring his 15-year career directly to this specific title and company requirements]
-
-## CORE COMPETENCIES
-[Bullet points of 8-12 prioritized hard skills and frameworks matching the job spec]
-
-## PROFESSIONAL EXPERIENCE
-### Enterprise PMO & Portfolio Manager | Chicago Public Schools
-Chicago, IL | Aug 2025 - Present
-- [Achievement bullets tailored with metrics]
-
-### Senior Project Manager / PMO Lead | Toyota Motor North America
-Ann Arbor, MI | Oct 2017 - Aug 2025
-- [Achievement bullets tailored with metrics]
-
-### Earlier Career Leadership Highlights
-- **Towergate Insurance (2015 - 2016)**: [1 strong achievement bullet]
-- **FCO Services - UK Foreign & Commonwealth Office (2014 - 2015)**: [1 strong achievement bullet]
-- **Vodafone - Airwave Emergency Services & London 2012 Olympics (2010 - 2014)**: [1 strong achievement bullet]
-
-## CERTIFICATIONS
-- PMP (Project Management Professional) - Active through June 2029
-- IIBA ECBA (Business Analysis) | ITIL v3 Foundation | Leadership & Management Diploma
-- ISO/IEC 20000 & ISO 9001 Framework Delivery
-
-## TECHNICAL TOOLKIT
-- **Portfolio & Delivery**: [Prioritized tools from master resume that match job spec]
-- **Data & Analytics**: Power BI, Excel (Advanced), ServiceNow SPM
-- **Cloud & Modern Tech**: AWS, Power Apps, Mendix, Generative AI
-
-## EDUCATION
-- BSc (Hons) Sports Therapy — London Metropolitan University, UK
+STRICT OUTPUT INSTRUCTIONS:
+1. You MUST retain the EXACT layout, headers, bullet style, and sections of the CANDIDATE BASELINE TEMPLATE.
+2. The sections must appear in this exact order:
+   - Header & Contact Line
+   - ## SUMMARY
+   - ## CORE CAPABILITIES (with categorized bold prefixes: Leadership & governance, Investment & reporting, Delivery)
+   - ## PROFESSIONAL EXPERIENCE (Chicago Public Schools, Toyota, Earlier Career)
+   - ## CERTIFICATIONS & EDUCATION
+   - ## TOOLS & TECHNOLOGY (with categorized bold prefixes: Portfolio & delivery, Reporting & collaboration, Low-code & AI)
+3. Tailor the content, keywords, and emphasis inside these sections to directly match the Target Job Specification based on the aggressiveness setting.
+4. Output ONLY valid Markdown.
 """
     return system_prompt
 
 
 def generate_tailored_resume_gemini(prompt):
-    """Calls Gemini API using Google's Interactions API for gemini-3.8-flash,
-
-    with generate_content fallback (sampling parameters omitted for Gemini
-    3.x).
-    """
     api_key = None
     if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
         api_key = str(st.secrets["GEMINI_API_KEY"])
@@ -192,7 +204,7 @@ def generate_tailored_resume_gemini(prompt):
         api_key = os.environ.get("GEMINI_API_KEY")
 
     if not api_key:
-        return "ERROR: `GEMINI_API_KEY` was not found. Please add it to your Streamlit Cloud App Secrets."
+        return "ERROR: `GEMINI_API_KEY` was not found. Please add it to Streamlit Secrets."
 
     api_key = api_key.strip().strip('"').strip("'")
 
@@ -201,7 +213,7 @@ def generate_tailored_resume_gemini(prompt):
     except Exception as e:
         return f"ERROR: Failed to initialize Gemini client: {e}"
 
-    # Method 1: Interactions API (primary interface for gemini-3.8-flash)
+    # Method 1: Interactions API for gemini-3.8-flash
     try:
         if hasattr(client, "interactions"):
             interaction = client.interactions.create(
@@ -210,9 +222,9 @@ def generate_tailored_resume_gemini(prompt):
             if hasattr(interaction, "output_text") and interaction.output_text:
                 return interaction.output_text
     except Exception:
-        pass  # Fall through to generate_content if interactions API is unavailable
+        pass
 
-    # Method 2: generate_content fallback (temperature omitted to avoid 400 validation errors)
+    # Method 2: generate_content fallback
     candidate_models = [
         "gemini-3.8-flash",
         "gemini-2.0-flash",
@@ -234,42 +246,131 @@ def generate_tailored_resume_gemini(prompt):
 
     return f"ERROR: Gemini API call failed: {last_error}"
 
+
 # ---------------------------------------------------------
-# 4. ATS-OPTIMIZED PDF GENERATOR
+# 5. VISUAL CHANGE HIGHLIGHTER (DIFF ENGINE)
 # ---------------------------------------------------------
-class ATSResumePDF(FPDF):
+def highlight_changes(base_text: str, tailored_text: str) -> str:
+    """Generates an HTML preview that highlights any modified or newly added words in soft green."""
+    base_lines = [l.strip() for l in base_text.splitlines() if l.strip()]
 
-    def header(self):
-        pass  # Omit decorative running headers that disrupt ATS parsers
+    html_output = [
+        "<div style='font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; "
+        "line-height: 1.5; color: #1e1e1e; background-color: #ffffff; padding: 22px; "
+        "border: 1px solid #e0e0e0; border-radius: 8px;'>"
+    ]
+
+    for raw_t in tailored_text.splitlines():
+        clean_t = raw_t.strip()
+        if not clean_t:
+            html_output.append("<div style='height: 8px;'></div>")
+            continue
+
+        if clean_t in base_lines:
+            line_html = clean_t
+        else:
+            # Find closest matching line in base resume
+            best_match = None
+            best_ratio = 0
+            for b_line in base_lines:
+                ratio = difflib.SequenceMatcher(None, b_line, clean_t).ratio()
+                if ratio > best_ratio and ratio > 0.35:
+                    best_ratio = ratio
+                    best_match = b_line
+
+            if best_match:
+                # Word-level diff
+                b_words = best_match.split()
+                t_words = clean_t.split()
+                matcher = difflib.SequenceMatcher(None, b_words, t_words)
+                diff_words = []
+                for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+                    chunk = " ".join(t_words[j1:j2])
+                    if not chunk:
+                        continue
+                    if tag == "equal":
+                        diff_words.append(chunk)
+                    else:
+                        diff_words.append(
+                            f'<mark style="background-color: #d1e7dd; color: #0f5132; '
+                            f'font-weight: 600; padding: 1px 4px; border-radius: 3px; '
+                            f'border: 1px solid #badbcc;">{chunk}</mark>'
+                        )
+                line_html = " ".join(diff_words)
+            else:
+                line_html = (
+                    f'<mark style="background-color: #d1e7dd; color: #0f5132; '
+                    f'font-weight: 600; padding: 1px 4px; border-radius: 3px; '
+                    f'border: 1px solid #badbcc;">{clean_t}</mark>'
+                )
+
+        # Style matching headers
+        if clean_t.startswith("# "):
+            clean_content = line_html.replace("# ", "")
+            html_output.append(
+                f"<h2 style='text-align: center; margin: 0 0 4px 0; font-size: 19px; color: #111;'>{clean_content}</h2>"
+            )
+        elif "@" in clean_t and "|" in clean_t:
+            html_output.append(
+                f"<div style='text-align: center; font-size: 12.5px; color: #555; margin-bottom: 12px;'>{line_html}</div>"
+            )
+        elif clean_t.startswith("## "):
+            clean_content = line_html.replace("## ", "")
+            html_output.append(
+                f"<h4 style='font-size: 13.5px; margin: 14px 0 4px 0; text-transform: uppercase; "
+                f"border-bottom: 1.5px solid #bbb; padding-bottom: 2px; color: #222;'>{clean_content}</h4>"
+            )
+        elif clean_t.startswith("### "):
+            clean_content = line_html.replace("### ", "")
+            html_output.append(
+                f"<div style='font-weight: bold; font-size: 13px; margin: 8px 0 2px 0; color: #222;'>{clean_content}</div>"
+            )
+        elif clean_t.startswith(("- ", "* ", "• ")):
+            prefix = clean_t[:2]
+            clean_content = (
+                line_html[2:].strip()
+                if line_html.startswith(prefix)
+                else line_html
+            )
+            clean_content = re.sub(
+                r"\*\*(.*?)\*\*", r"<strong>\1</strong>", clean_content
+            )
+            html_output.append(
+                f"<div style='margin-left: 16px; margin-bottom: 4px; font-size: 12.5px;'>• {clean_content}</div>"
+            )
+        else:
+            clean_content = re.sub(
+                r"\*\*(.*?)\*\*", r"<strong>\1</strong>", line_html
+            )
+            html_output.append(
+                f"<div style='font-size: 12.5px; margin-bottom: 4px;'>{clean_content}</div>"
+            )
+
+    html_output.append("</div>")
+    return "\n".join(html_output)
 
 
-class ATSResumePDF(FPDF):
-
-    def header(self):
-        pass  # Omit running headers that trip ATS scanners
-
-
+# ---------------------------------------------------------
+# 6. ATS PDF COMPILER (UNICODE SAFE & ATS-COMPLIANT)
+# ---------------------------------------------------------
 def clean_text_for_pdf(text: str) -> str:
-    """Replaces Unicode typographical symbols with standard ATS/Latin-1 characters."""
     replacements = {
-        "\u2014": " - ",  # em-dash (—)
-        "\u2013": "-",  # en-dash (–)
-        "\u2015": " - ",  # horizontal bar
-        "\u2018": "'",  # curly left single quote (‘)
-        "\u2019": "'",  # curly right single quote (’)
-        "\u201c": '"',  # curly left double quote (“)
-        "\u201d": '"',  # curly right double quote (”)
-        "\u2022": "-",  # bullet point (•)
-        "\u2026": "...",  # ellipsis (…)
-        "\u00a0": " ",  # non-breaking space
-        "\u2010": "-",  # hyphen
-        "\u2011": "-",  # non-breaking hyphen
-        "\u00b7": "-",  # middle dot
+        "\u2014": " - ",
+        "\u2013": "-",
+        "\u2015": " - ",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2022": "-",
+        "\u2026": "...",
+        "\u00a0": " ",
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u00b7": "-",
     }
     for bad_char, good_char in replacements.items():
         text = text.replace(bad_char, good_char)
-
-    # Encode to latin-1, replacing any other unmapped foreign characters safely
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
@@ -280,9 +381,7 @@ class ATSResumePDF(FPDF):
 
 
 def compile_resume_to_pdf(markdown_text):
-    """Compiles Markdown text into a clean, single-column, ATS-compliant PDF."""
     pdf = ATSResumePDF(format="letter", unit="pt")
-
     pdf.set_margins(36, 36, 36)
     pdf.set_auto_page_break(auto=True, margin=36)
     pdf.add_page()
@@ -292,8 +391,6 @@ def compile_resume_to_pdf(markdown_text):
         if hasattr(pdf, "epw")
         else (pdf.w - pdf.l_margin - pdf.r_margin)
     )
-
-    # Sanitize the entire text before splitting into lines
     clean_markdown = clean_text_for_pdf(markdown_text)
 
     lines = clean_markdown.split("\n")
@@ -305,91 +402,79 @@ def compile_resume_to_pdf(markdown_text):
 
         pdf.set_x(pdf.l_margin)
 
-        # 1. Main Header / Candidate Name (#)
         if line.startswith("# "):
-            pdf.set_font("Helvetica", "B", 15)
+            pdf.set_font("Helvetica", "B", 14)
             pdf.set_text_color(20, 20, 20)
             clean_name = line.replace("# ", "").replace("*", "")
             pdf.cell(
                 content_width,
-                20,
+                18,
                 clean_name,
                 align="C",
                 new_x="LMARGIN",
                 new_y="NEXT",
             )
             pdf.ln(1)
-
-        # 2. Contact Information Line
         elif "@" in line and "|" in line:
-            pdf.set_font("Helvetica", "", 9)
-            pdf.set_text_color(80, 80, 80)
+            pdf.set_font("Helvetica", "", 8.5)
+            pdf.set_text_color(70, 70, 70)
             clean_contact = line.replace("*", "")
             pdf.cell(
                 content_width,
-                13,
+                12,
                 clean_contact,
                 align="C",
                 new_x="LMARGIN",
                 new_y="NEXT",
             )
             pdf.ln(3)
-
-        # 3. Section Titles (##)
         elif line.startswith("## "):
-            pdf.ln(5)
-            pdf.set_font("Helvetica", "B", 10.5)
+            pdf.ln(4)
+            pdf.set_font("Helvetica", "B", 10)
             pdf.set_text_color(0, 0, 0)
             clean_title = line.replace("## ", "").replace("*", "").upper()
             pdf.cell(
                 content_width,
-                14,
+                13,
                 clean_title,
                 new_x="LMARGIN",
                 new_y="NEXT",
             )
-
             line_y = pdf.get_y()
             pdf.set_draw_color(180, 180, 180)
             pdf.set_line_width(0.75)
             pdf.line(pdf.l_margin, line_y, pdf.w - pdf.r_margin, line_y)
-            pdf.ln(4)
-
-        # 4. Job Titles / Company Subheadings (###)
-        elif line.startswith("### "):
             pdf.ln(3)
-            pdf.set_font("Helvetica", "B", 9.5)
+        elif line.startswith("### "):
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(20, 20, 20)
             clean_subhead = line.replace("### ", "").replace("*", "")
             pdf.cell(
                 content_width,
-                13,
+                12,
                 clean_subhead,
                 new_x="LMARGIN",
                 new_y="NEXT",
             )
-
-        # 5. Bullet Points
         elif line.startswith(("- ", "* ")):
-            pdf.set_font("Helvetica", "", 9)
+            pdf.set_font("Helvetica", "", 8.5)
             pdf.set_text_color(30, 30, 30)
             bullet_body = line[2:].strip()
             pdf.multi_cell(
                 content_width,
-                12.5,
+                11.5,
                 f"  -  {bullet_body}",
                 markdown=True,
                 new_x="LMARGIN",
                 new_y="NEXT",
             )
-
-        # 6. Standard Paragraph / Earlier Career Lines
         else:
-            pdf.set_font("Helvetica", "", 9)
+            pdf.set_font("Helvetica", "", 8.5)
             pdf.set_text_color(30, 30, 30)
             pdf.multi_cell(
                 content_width,
-                12.5,
+                11.5,
                 line,
                 markdown=True,
                 new_x="LMARGIN",
@@ -400,16 +485,14 @@ def compile_resume_to_pdf(markdown_text):
 
 
 # ---------------------------------------------------------
-# 5. STREAMLIT INTERFACE
+# 7. STREAMLIT APPLICATION INTERFACE
 # ---------------------------------------------------------
 st.title("🎯 Tailored Resume Builder & ATS PDF Generator")
-st.caption(
-    "Dynamically optimize your resume against target PMO job descriptions."
-)
+st.caption("Baseline Template locked • AI Keyword Optimization • Live Diff")
 
 if not master_data:
     st.error(
-        "Could not find `master_resume.json` in the current folder. Please place the file in the same directory as this script."
+        "Could not find `master_resume.json` in the current folder. Please verify the file is in the repo root."
     )
     st.stop()
 
@@ -436,7 +519,6 @@ with col_left:
         else:
             st.warning("Please paste a LinkedIn URL first.")
 
-    # Manual input / fallback
     default_desc = ""
     default_title = "PMO / Project Management Lead"
     default_company = "Target Company"
@@ -451,7 +533,7 @@ with col_left:
     job_description = st.text_area(
         "Full Job Description (Editable / Paste manual specs here):",
         value=default_desc,
-        height=260,
+        height=240,
     )
 
     st.subheader("2. Tailoring Aggressiveness")
@@ -463,7 +545,7 @@ with col_left:
     )
     if slider_val <= 3:
         st.info(
-            "🔒 **Strict Mode:** Only uses verified facts and tools directly listed in master resume."
+            "🔒 **Strict Mode:** Only uses verified facts and tools directly in your baseline resume."
         )
     elif slider_val <= 7:
         st.info(
@@ -471,7 +553,7 @@ with col_left:
         )
     else:
         st.info(
-            "🚀 **Aggressive Mode:** Directly mirrors all primary keywords, frameworks, and ERP/platforms into experience bullets."
+            "🚀 **Aggressive Mode:** Directly mirrors all primary job keywords, frameworks, and ERP/platforms into experience bullets."
         )
 
     if st.button("⚡ Generate Tailored Resume", type="primary"):
@@ -488,42 +570,55 @@ with col_left:
                     current_job_spec, master_data, slider_val
                 )
                 generated_text = generate_tailored_resume_gemini(prompt)
-                st.session_state["tailored_markdown"] = generated_text
-                st.success("Draft ready for review!")
+
+                if generated_text.startswith("ERROR:"):
+                    st.error(generated_text)
+                else:
+                    st.session_state["tailored_markdown"] = generated_text
+                    st.success("Draft ready for review!")
 
 with col_right:
-    st.subheader("3. Review & Approval (Editable)")
-    st.caption(
-        "Make any wording or metric modifications before generating your final PDF."
+    st.subheader("3. Review & Approval")
+
+    tab_preview, tab_edit = st.tabs(
+        ["🔍 Highlighted Changes Preview", "✏️ Edit Markdown (Approval)"]
     )
 
-    if "tailored_markdown" in st.session_state:
+    with tab_preview:
+        st.markdown(
+            "> 🟢 **Green highlighted text** marks keywords, metrics, or phrases modified/added from your original baseline resume."
+        )
+        diff_html = highlight_changes(
+            ORIGINAL_RESUME_TEMPLATE, st.session_state["tailored_markdown"]
+        )
+        st.markdown(diff_html, unsafe_allow_html=True)
+
+    with tab_edit:
+        st.caption(
+            "Make any manual adjustments below. Edits here will be included in the exported PDF."
+        )
         user_approved_markdown = st.text_area(
-            "Tailored Markdown Content:",
+            "Markdown Editor:",
             value=st.session_state["tailored_markdown"],
-            height=580,
+            height=540,
         )
+        # Keep session state synced with edits
+        st.session_state["tailored_markdown"] = user_approved_markdown
 
-        st.subheader("4. Export ATS-Compliant PDF")
-        try:
-            pdf_bytes = compile_resume_to_pdf(user_approved_markdown)
-            safe_company = "".join(
-                c for c in job_company if c.isalnum() or c in (" ", "_")
-            ).rstrip()
-            filename = (
-                f"Kevin_George_{safe_company.replace(' ', '_')}_Resume.pdf"
-            )
+    st.subheader("4. Export ATS-Compliant PDF")
+    try:
+        pdf_bytes = compile_resume_to_pdf(st.session_state["tailored_markdown"])
+        safe_company = "".join(
+            c for c in job_company if c.isalnum() or c in (" ", "_")
+        ).rstrip()
+        filename = f"Kevin_George_{safe_company.replace(' ', '_')}_Resume.pdf"
 
-            st.download_button(
-                label=f"📥 Download {filename}",
-                data=pdf_bytes,
-                file_name=filename,
-                mime="application/pdf",
-                type="primary",
-            )
-        except Exception as e:
-            st.error(f"Error compiling PDF: {e}")
-    else:
-        st.info(
-            "Your generated resume draft will appear here for review and editing once you click 'Generate Tailored Resume'."
+        st.download_button(
+            label=f"📥 Download {filename}",
+            data=pdf_bytes,
+            file_name=filename,
+            mime="application/pdf",
+            type="primary",
         )
+    except Exception as e:
+        st.error(f"Error compiling PDF: {e}")
