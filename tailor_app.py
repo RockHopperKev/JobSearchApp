@@ -500,8 +500,20 @@ col_left, col_right = st.columns([1, 1], gap="medium")
 
 with col_left:
     st.subheader("1. Target Job Source")
+
+    # Read job_url passed from Telegram deep link (if present)
+    url_from_params = st.query_params.get("job_url", "")
+
+    # Auto-fetch if opened directly from Telegram and not yet loaded
+    if url_from_params and "job_spec" not in st.session_state:
+        with st.spinner("Loading job details from Telegram link..."):
+            job_data, err = fetch_linkedin_job_details(url_from_params)
+            if not err:
+                st.session_state["job_spec"] = job_data
+
     job_url_input = st.text_input(
         "LinkedIn Job Posting URL:",
+        value=url_from_params,
         placeholder="https://www.linkedin.com/jobs/view/4444736837/",
     )
 
