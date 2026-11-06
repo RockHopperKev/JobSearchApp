@@ -467,7 +467,13 @@ def answer_callback_query(bot_token, callback_id, text):
     url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
     try:
         requests.post(
-            url, json={"callback_query_id": callback_id, "text": text}, timeout=5
+            url,
+            json={
+                "callback_query_id": callback_id,
+                "text": text,
+                "show_alert": True,  # Forces a visible modal popup on screen
+            },
+            timeout=5,
         )
     except Exception as e:
         print(f"Callback answer warning: {e}")
