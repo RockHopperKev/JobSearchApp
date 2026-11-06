@@ -3,6 +3,10 @@ import urllib.parse
 import time
 from bs4 import BeautifulSoup
 import requests
+import json
+import re
+import urllib.parse
+import requests
 
 # Fetch secrets from GitHub Actions environment
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -15,22 +19,42 @@ STREAMLIT_APP_URL = "https://jobsearchapp-figoj6etchhhoaopoxrmqp.streamlit.app/"
 
 
 def send_telegram_alert(job):
-    """Sends a formatted message to your Telegram app with 1-click tailoring link."""
-    encoded_job_url = urllib.parse.quote(job["Link"])
-    tailor_link = f"{STREAMLIT_APP_URL}?job_url={encoded_job_url}"
+    """Sends a job alert with an interactive in-app callback button."""
+    # Extract numerical LinkedIn job ID (Telegram callback_data has a 64-byte limit)
+    match = re.search(r"(\d{8,})", job["Link"])
+    job_id = match.group(1) if match else "unknown"
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
     message = (
         f"🚨 <b>NEW PRIORITY JOB</b> 🚨\n\n"
         f"💼 <b>{job['Title']}</b>\n"
         f"🏢 {job['Company']}\n"
         f"📍 {job['Location']}\n"
-        f"🕒 {job['Posted']}\n\n"
-        f"<a href='{job['Link']}'>🔗 View on LinkedIn</a> | "
-        f"<a href='{tailor_link}'>📄 <b>Tailor Resume</b></a>"
+        f"🕒 {job['Posted']}"
     )
-    data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-    requests.post(url, data=data)
+
+    # Inline keyboard with direct LinkedIn link and in-app Tailor button
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML",
+        "reply_markup": json.dumps(
+            {
+                "inline_keyboard": [
+                    [
+                        {"text": "🔗 View Posting", "url": job["Link"]},
+                        {
+                            "text": "⚡ Tailor & Apply",
+                            "callback_data": f"tailor:{job_id}",
+                        },
+                    ]
+                ]
+            }
+        ),
+    }
+
+    requests.post(url, json=payload)
 
 
 def load_seen_jobs():
