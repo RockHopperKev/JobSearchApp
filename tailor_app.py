@@ -7,6 +7,8 @@ from fpdf import FPDF
 from google import genai
 import requests
 import streamlit as st
+import threading
+import time
 
 st.set_page_config(
     page_title="AI Resume Tailor & ATS Exporter", page_icon="📄", layout="wide"
@@ -461,6 +463,155 @@ def compile_resume_to_pdf(markdown_text):
 
     return bytes(pdf.output())
 
+# ---------------------------------------------------------
+# TELEGRAM BACKGROUND BOT WORKER
+# ---------------------------------------------------------
+# Optional: Set this to a separate Channel ID, Group ID, or Topic ID
+# If left as None, it defaults to sending back to the chat you clicked it in.
+APPLIED_CHAT_ID = os.environ.get("APPLIED_CHAT_ID")
+APPLIED_THREAD_ID = os.environ.get(
+    "APPLIED_THREAD_ID"
+)  # For Telegram Forum Topics
+
+
+def answer_callback_query(bot_token, callback_id, text):
+    """Shows an immediate popup notification inside Telegram."""
+    url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
+    try:
+        requests.post(
+            url, json={"callback_query_id": callback_id, "text": text}
+        )
+    except Exception:
+        pass
+
+
+def send_pdf_to_telegram(
+    bot_token, target_chat_id, pdf_bytes, filename, caption, thread_id=None
+):
+    """Sends the tailored PDF document directly into Telegram."""
+    url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+    data = {
+        "chat_id": target_chat_id,
+        "caption": caption,
+        "parse_mode": "HTML",
+    }
+    if thread_id:
+        data["message_thread_id"] = int(thread_id)
+
+    files = {"document": (filename, pdf_bytes, "application/pdf")}
+    requests.post(url, data=data, files=files)
+
+
+def process_telegram_tailor_request(bot_token, job_id, chat_id):
+    """Background task: Scrapes spec, runs Gemini, compiles ATS PDF, and sends to Telegram."""
+    job_url = f"https://www.linkedin.com/jobs/view/{job_id}/"
+    job_data, err = fetch_linkedin_job_details(job_url)
+
+    if err or not job_data:
+        # Fallback if LinkedIn guest API throttles
+        job_data = {
+            "title": "Target Role",
+            "company": "Target Company",
+            "description": f"Target job ID: {job_id}",
+        }
+
+    # Generate tailored resume using Gemini at balanced setting (6/10)
+    prompt = build_tailoring_prompt(job_data, master_data, aggressiveness=6)
+    tailored_md = generate_tailored_resume_gemini(prompt)
+
+    if tailored_md.startswith("ERROR:"):
+        fail_msg = f"❌ Tailoring failed for {job_data['title']}: {tailored_md}"
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": fail_msg},
+        )
+        return
+
+    # Compile ATS-ready PDF
+    pdf_bytes = compile_resume_to_pdf(tailored_md)
+    safe_company = "".join(
+        c for c in job_data["company"] if c.isalnum() or c in (" ", "_")
+    ).strip()
+    filename = (
+        f"Kevin_George_{safe_company.replace(' ', '_')}_Resume.pdf"
+        if safe_company
+        else "Kevin_George_Resume.pdf"
+    )
+
+    caption = (
+        f"🎯 <b>TAILORED RESUME READY</b>\n\n"
+        f"💼 <b>{job_data['title']}</b>\n"
+        f"🏢 {job_data['company']}\n\n"
+        f"🔗 <a href='{job_url}'>Click Here to Apply on LinkedIn</a>"
+    )
+
+    # Route to separate chat/thread if configured, otherwise reply in current chat
+    dest_chat = APPLIED_CHAT_ID if APPLIED_CHAT_ID else chat_id
+    send_pdf_to_telegram(
+        bot_token,
+        dest_chat,
+        pdf_bytes,
+        filename,
+        caption,
+        thread_id=APPLIED_THREAD_ID,
+    )
+
+
+def telegram_polling_daemon():
+    """Polls Telegram for button clicks continuously in the background."""
+    bot_token = None
+    if hasattr(st, "secrets") and "TELEGRAM_TOKEN" in st.secrets:
+        bot_token = str(st.secrets["TELEGRAM_TOKEN"])
+    elif "TELEGRAM_TOKEN" in os.environ:
+        bot_token = os.environ.get("TELEGRAM_TOKEN")
+
+    if not bot_token:
+        return
+
+    offset = 0
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={offset}&timeout=20"
+            resp = requests.get(url, timeout=25)
+            if resp.status_code == 200:
+                data = resp.json()
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+
+                    if "callback_query" in update:
+                        cb = update["callback_query"]
+                        cb_data = cb.get("data", "")
+                        cb_id = cb.get("id")
+                        chat_id = cb["message"]["chat"]["id"]
+
+                        if cb_data.startswith("tailor:"):
+                            job_id = cb_data.split(":", 1)[1]
+                            # Immediate Telegram on-screen toast
+                            answer_callback_query(
+                                bot_token,
+                                cb_id,
+                                "⏳ Tailoring resume in background... PDF incoming!",
+                            )
+
+                            # Run tailoring in an asynchronous thread so bot polling never hangs
+                            threading.Thread(
+                                target=process_telegram_tailor_request,
+                                args=(bot_token, job_id, chat_id),
+                                daemon=True,
+                            ).start()
+        except Exception:
+            time.sleep(5)
+
+
+# Start daemon once in Streamlit Cloud
+@st.cache_resource
+def start_bot_listener():
+    t = threading.Thread(target=telegram_polling_daemon, daemon=True)
+    t.start()
+    return t
+
+
+start_bot_listener()
 
 # ---------------------------------------------------------
 # 7. STREAMLIT APPLICATION INTERFACE
