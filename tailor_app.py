@@ -2,17 +2,28 @@ import difflib
 import json
 import os
 import re
+import threading
+import time
 from bs4 import BeautifulSoup
 from fpdf import FPDF
 from google import genai
 import requests
 import streamlit as st
-import threading
-import time
 
 st.set_page_config(
     page_title="AI Resume Tailor & ATS Exporter", page_icon="📄", layout="wide"
 )
+
+
+# Helper to safely retrieve secrets from st.secrets or os.environ
+def get_secret(key, default=None):
+    if hasattr(st, "secrets") and key in st.secrets:
+        return str(st.secrets[key]).strip().strip('"').strip("'")
+    val = os.environ.get(key, default)
+    if val:
+        return str(val).strip().strip('"').strip("'")
+    return default
+
 
 # ---------------------------------------------------------
 # 1. BASELINE ORIGINAL RESUME TEMPLATE (PERMANENT STARTING POINT)
@@ -76,7 +87,6 @@ def load_master_resume():
 
 master_data = load_master_resume()
 
-# Initialize session state with baseline template
 if "tailored_markdown" not in st.session_state:
     st.session_state["tailored_markdown"] = ORIGINAL_RESUME_TEMPLATE
 
@@ -106,7 +116,7 @@ def fetch_linkedin_job_details(job_url):
         if resp.status_code != 200:
             return (
                 None,
-                f"LinkedIn blocked or throttled the request (HTTP {resp.status_code}). Please paste the job description manually below.",
+                f"LinkedIn blocked or throttled the request (HTTP {resp.status_code}).",
             )
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -123,10 +133,7 @@ def fetch_linkedin_job_details(job_url):
         )
 
         if not desc:
-            return (
-                None,
-                "Job description was empty. Please paste the job text manually below.",
-            )
+            return None, "Job description was empty."
 
         return {"title": title, "company": company, "description": desc}, None
     except Exception as e:
@@ -199,16 +206,9 @@ STRICT OUTPUT INSTRUCTIONS:
 
 
 def generate_tailored_resume_gemini(prompt):
-    api_key = None
-    if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-        api_key = str(st.secrets["GEMINI_API_KEY"])
-    elif "GEMINI_API_KEY" in os.environ:
-        api_key = os.environ.get("GEMINI_API_KEY")
-
+    api_key = get_secret("GEMINI_API_KEY")
     if not api_key:
         return "ERROR: `GEMINI_API_KEY` was not found. Please add it to Streamlit Secrets."
-
-    api_key = api_key.strip().strip('"').strip("'")
 
     try:
         client = genai.Client(api_key=api_key)
@@ -253,7 +253,6 @@ def generate_tailored_resume_gemini(prompt):
 # 5. VISUAL CHANGE HIGHLIGHTER (DIFF ENGINE)
 # ---------------------------------------------------------
 def highlight_changes(base_text: str, tailored_text: str) -> str:
-    """Generates an HTML preview that highlights any modified or newly added words in soft green."""
     base_lines = [l.strip() for l in base_text.splitlines() if l.strip()]
 
     html_output = [
@@ -271,7 +270,6 @@ def highlight_changes(base_text: str, tailored_text: str) -> str:
         if clean_t in base_lines:
             line_html = clean_t
         else:
-            # Find closest matching line in base resume
             best_match = None
             best_ratio = 0
             for b_line in base_lines:
@@ -281,7 +279,6 @@ def highlight_changes(base_text: str, tailored_text: str) -> str:
                     best_match = b_line
 
             if best_match:
-                # Word-level diff
                 b_words = best_match.split()
                 t_words = clean_t.split()
                 matcher = difflib.SequenceMatcher(None, b_words, t_words)
@@ -306,7 +303,6 @@ def highlight_changes(base_text: str, tailored_text: str) -> str:
                     f'border: 1px solid #badbcc;">{clean_t}</mark>'
                 )
 
-        # Style matching headers
         if clean_t.startswith("# "):
             clean_content = line_html.replace("# ", "")
             html_output.append(
@@ -463,32 +459,23 @@ def compile_resume_to_pdf(markdown_text):
 
     return bytes(pdf.output())
 
-# ---------------------------------------------------------
-# TELEGRAM BACKGROUND BOT WORKER
-# ---------------------------------------------------------
-# Optional: Set this to a separate Channel ID, Group ID, or Topic ID
-# If left as None, it defaults to sending back to the chat you clicked it in.
-APPLIED_CHAT_ID = os.environ.get("APPLIED_CHAT_ID")
-APPLIED_THREAD_ID = os.environ.get(
-    "APPLIED_THREAD_ID"
-)  # For Telegram Forum Topics
 
-
+# ---------------------------------------------------------
+# 7. TELEGRAM BACKGROUND BOT WORKER
+# ---------------------------------------------------------
 def answer_callback_query(bot_token, callback_id, text):
-    """Shows an immediate popup notification inside Telegram."""
     url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
     try:
         requests.post(
-            url, json={"callback_query_id": callback_id, "text": text}
+            url, json={"callback_query_id": callback_id, "text": text}, timeout=5
         )
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Callback answer warning: {e}")
 
 
 def send_pdf_to_telegram(
     bot_token, target_chat_id, pdf_bytes, filename, caption, thread_id=None
 ):
-    """Sends the tailored PDF document directly into Telegram."""
     url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
     data = {
         "chat_id": target_chat_id,
@@ -496,38 +483,49 @@ def send_pdf_to_telegram(
         "parse_mode": "HTML",
     }
     if thread_id:
-        data["message_thread_id"] = int(thread_id)
+        try:
+            data["message_thread_id"] = int(thread_id)
+        except Exception:
+            pass
 
     files = {"document": (filename, pdf_bytes, "application/pdf")}
-    requests.post(url, data=data, files=files)
+    try:
+        resp = requests.post(url, data=data, files=files, timeout=30)
+        if resp.status_code != 200:
+            print(f"❌ Telegram sendDocument error ({resp.status_code}): {resp.text}")
+        else:
+            print(f"✅ Delivered tailored PDF to chat {target_chat_id}: {filename}")
+    except Exception as e:
+        print(f"❌ Exception uploading PDF to Telegram: {e}")
 
 
 def process_telegram_tailor_request(bot_token, job_id, chat_id):
-    """Background task: Scrapes spec, runs Gemini, compiles ATS PDF, and sends to Telegram."""
+    print(f"⚡ Processing tailor request for Job ID: {job_id} from Chat: {chat_id}")
     job_url = f"https://www.linkedin.com/jobs/view/{job_id}/"
     job_data, err = fetch_linkedin_job_details(job_url)
 
     if err or not job_data:
-        # Fallback if LinkedIn guest API throttles
+        print(f"LinkedIn fetch note ({err}); falling back to basic metadata.")
         job_data = {
-            "title": "Target Role",
+            "title": "PMO / Project Management Lead",
             "company": "Target Company",
-            "description": f"Target job ID: {job_id}",
+            "description": f"Target job listing ID: {job_id}",
         }
 
-    # Generate tailored resume using Gemini at balanced setting (6/10)
+    print(f"🤖 Generating tailored resume via Gemini for: {job_data['title']} at {job_data['company']}...")
     prompt = build_tailoring_prompt(job_data, master_data, aggressiveness=6)
     tailored_md = generate_tailored_resume_gemini(prompt)
 
     if tailored_md.startswith("ERROR:"):
-        fail_msg = f"❌ Tailoring failed for {job_data['title']}: {tailored_md}"
+        print(f"❌ Gemini tailoring error: {tailored_md}")
         requests.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": fail_msg},
+            json={"chat_id": chat_id, "text": f"❌ Tailoring failed: {tailored_md}"},
+            timeout=10,
         )
         return
 
-    # Compile ATS-ready PDF
+    print("📄 Compiling tailored markdown into ATS PDF...")
     pdf_bytes = compile_resume_to_pdf(tailored_md)
     safe_company = "".join(
         c for c in job_data["company"] if c.isalnum() or c in (" ", "_")
@@ -545,30 +543,38 @@ def process_telegram_tailor_request(bot_token, job_id, chat_id):
         f"🔗 <a href='{job_url}'>Click Here to Apply on LinkedIn</a>"
     )
 
-    # Route to separate chat/thread if configured, otherwise reply in current chat
-    dest_chat = APPLIED_CHAT_ID if APPLIED_CHAT_ID else chat_id
+    applied_chat = get_secret("APPLIED_CHAT_ID")
+    applied_thread = get_secret("APPLIED_THREAD_ID")
+    dest_chat = applied_chat if applied_chat else chat_id
+
+    print(f"📤 Uploading document to destination chat: {dest_chat}...")
     send_pdf_to_telegram(
         bot_token,
         dest_chat,
         pdf_bytes,
         filename,
         caption,
-        thread_id=APPLIED_THREAD_ID,
+        thread_id=applied_thread,
     )
 
 
 def telegram_polling_daemon():
-    """Polls Telegram for button clicks continuously in the background."""
-    bot_token = None
-    if hasattr(st, "secrets") and "TELEGRAM_TOKEN" in st.secrets:
-        bot_token = str(st.secrets["TELEGRAM_TOKEN"])
-    elif "TELEGRAM_TOKEN" in os.environ:
-        bot_token = os.environ.get("TELEGRAM_TOKEN")
-
+    bot_token = get_secret("TELEGRAM_TOKEN")
     if not bot_token:
+        print("❌ TELEGRAM_TOKEN missing in Streamlit Secrets; background listener idle.")
         return
 
+    # Clear lingering webhooks or conflict locks
+    try:
+        requests.get(
+            f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=false",
+            timeout=10,
+        )
+    except Exception:
+        pass
+
     offset = 0
+    print("🚀 Telegram background listener started and actively polling...")
     while True:
         try:
             url = f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={offset}&timeout=20"
@@ -582,42 +588,60 @@ def telegram_polling_daemon():
                         cb = update["callback_query"]
                         cb_data = cb.get("data", "")
                         cb_id = cb.get("id")
-                        chat_id = cb["message"]["chat"]["id"]
+                        chat_obj = cb.get("message", {}).get("chat", {})
+                        chat_id = chat_obj.get("id") or cb.get("from", {}).get("id")
 
                         if cb_data.startswith("tailor:"):
                             job_id = cb_data.split(":", 1)[1]
-                            # Immediate Telegram on-screen toast
+                            print(f"⚡ Received 'Tailor & Apply' callback for Job ID {job_id}!")
                             answer_callback_query(
                                 bot_token,
                                 cb_id,
                                 "⏳ Tailoring resume in background... PDF incoming!",
                             )
-
-                            # Run tailoring in an asynchronous thread so bot polling never hangs
                             threading.Thread(
                                 target=process_telegram_tailor_request,
                                 args=(bot_token, job_id, chat_id),
                                 daemon=True,
                             ).start()
-        except Exception:
+            elif resp.status_code == 409:
+                print("⚠️ Telegram 409 Conflict: another connection open. Retrying in 10s...")
+                time.sleep(10)
+            else:
+                print(f"⚠️ Telegram polling status {resp.status_code}: {resp.text}")
+                time.sleep(5)
+        except requests.exceptions.Timeout:
+            continue
+        except Exception as e:
+            print(f"⚠️ Exception in polling loop: {e}")
             time.sleep(5)
 
 
-# Start daemon once in Streamlit Cloud
+# Self-healing thread manager (restarts thread if it ever crashes)
+class BotRunner:
+    def __init__(self):
+        self.thread = None
+        self.ensure_running()
+
+    def ensure_running(self):
+        if self.thread is None or not self.thread.is_alive():
+            self.thread = threading.Thread(target=telegram_polling_daemon, daemon=True)
+            self.thread.start()
+
+
 @st.cache_resource
-def start_bot_listener():
-    t = threading.Thread(target=telegram_polling_daemon, daemon=True)
-    t.start()
-    return t
+def get_bot_runner():
+    return BotRunner()
 
 
-start_bot_listener()
+runner = get_bot_runner()
+runner.ensure_running()
 
 # ---------------------------------------------------------
-# 7. STREAMLIT APPLICATION INTERFACE
+# 8. STREAMLIT APPLICATION INTERFACE
 # ---------------------------------------------------------
 st.title("🎯 Tailored Resume Builder & ATS PDF Generator")
-st.caption("Baseline Template locked • AI Keyword Optimization • Live Diff")
+st.caption("Baseline Template locked • AI Keyword Optimization • Background Telegram Delivery")
 
 if not master_data:
     st.error(
@@ -629,11 +653,9 @@ col_left, col_right = st.columns([1, 1], gap="medium")
 
 with col_left:
     st.subheader("1. Target Job Source")
-    
-    # Read incoming URL parameter from Telegram deep link
+
     url_from_params = st.query_params.get("job_url", "")
 
-    # Auto-fetch if the page was opened directly via Telegram link and not yet parsed
     if url_from_params and "job_spec" not in st.session_state:
         with st.spinner("Auto-fetching job spec from link..."):
             job_data, err = fetch_linkedin_job_details(url_from_params)
@@ -643,7 +665,7 @@ with col_left:
     job_url_input = st.text_input(
         "LinkedIn Job Posting URL:",
         value=url_from_params,
-        placeholder="https://www.linkedin.com/jobs/view/4444736837/",
+        placeholder="https://www.linkedin.com/jobs/view/...",
     )
 
     if st.button("📥 Fetch Job from LinkedIn"):
@@ -684,18 +706,6 @@ with col_left:
         max_value=10,
         value=6,
     )
-    if slider_val <= 3:
-        st.info(
-            "🔒 **Strict Mode:** Only uses verified facts and tools directly in your baseline resume."
-        )
-    elif slider_val <= 7:
-        st.info(
-            "⚖️ **Balanced Mode (Recommended):** Extrapolates adjacent PMO governance, platforms, and methodologies."
-        )
-    else:
-        st.info(
-            "🚀 **Aggressive Mode:** Directly mirrors all primary job keywords, frameworks, and ERP/platforms into experience bullets."
-        )
 
     if st.button("⚡ Generate Tailored Resume", type="primary"):
         if not job_description:
@@ -747,14 +757,17 @@ with col_right:
         st.session_state["tailored_markdown"] = user_approved_markdown
 
     st.subheader("4. Export ATS-Compliant PDF")
-    
-    is_tailored = st.session_state.get("has_tailored", False) or st.session_state.get("tailored_markdown") != ORIGINAL_RESUME_TEMPLATE
-    
+
+    is_tailored = (
+        st.session_state.get("has_tailored", False)
+        or st.session_state.get("tailored_markdown") != ORIGINAL_RESUME_TEMPLATE
+    )
+
     if not is_tailored:
         st.warning(
             "⚠️ You are viewing the default baseline resume. Tap **'⚡ Generate Tailored Resume'** above before downloading."
         )
-        
+
     try:
         pdf_bytes = compile_resume_to_pdf(st.session_state["tailored_markdown"])
         safe_company = "".join(
