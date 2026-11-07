@@ -339,14 +339,26 @@ def telegram_polling_daemon():
                 data = resp.json()
                 for update in data.get("result", []):
                     offset = update["update_id"] + 1
+                    
+                    # 1. Catch /ping commands to prove Streamlit is alive
+                    if "message" in update and "text" in update["message"]:
+                        if update["message"]["text"].strip().lower() == "/ping":
+                            chat_id = update["message"]["chat"]["id"]
+                            requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": "🏓 Pong from Streamlit! Listener is alive."})
+                    
+                    # 2. Catch ALL button clicks and echo them to the chat
                     if "callback_query" in update:
                         cb = update["callback_query"]
                         cb_data = cb.get("data", "")
+                        chat_id = cb.get("message", {}).get("chat", {}).get("id") or cb.get("from", {}).get("id")
+                        
+                        # Debug: Send the exact callback data back to Telegram so we can see it
+                        requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": f"🛠️ Debug: Button tapped! Hidden data is: '{cb_data}'"})
+                        
                         if cb_data.startswith("tailor:"):
                             job_id = cb_data.split(":", 1)[1]
-                            print(f"⚡ Received 'Tailor & Apply' callback for Job ID {job_id}!")
                             answer_callback_query(bot_token, cb.get("id"), "⏳ Tailoring resume in background... PDF incoming!")
-                            threading.Thread(target=process_telegram_tailor_request, args=(bot_token, job_id, cb.get("message", {}).get("chat", {}).get("id")), daemon=True).start()
+                            threading.Thread(target=process_telegram_tailor_request, args=(bot_token, job_id, chat_id), daemon=True).start()
             elif resp.status_code == 409: time.sleep(10)
             else: time.sleep(5)
         except Exception: time.sleep(5)
