@@ -384,7 +384,7 @@ def telegram_polling_daemon():
                             timeout=10,
                         )
 
-                    # 2. Button clicks
+                                        # 2. Button clicks
                     if "callback_query" in update:
                         cb = update["callback_query"]
                         cb_data = cb.get("data", "")
