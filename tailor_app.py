@@ -402,13 +402,6 @@ def telegram_polling_daemon():
                         else:
                             answer_callback_query(bot_token, cb.get("id"), f"Unrecognized button: {cb_data}")
 
-                        if cb_data.startswith("tailor:"):
-                            job_id = cb_data.split(":", 1)[1]
-                            threading.Thread(
-                                target=process_telegram_tailor_request,
-                                args=(bot_token, job_id, chat_id),
-                                daemon=True,
-                            ).start()
             elif resp.status_code == 409:
                 print("⚠️ 409 Conflict: another getUpdates consumer is running for this token.", flush=True)
                 time.sleep(10)
