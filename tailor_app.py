@@ -302,66 +302,123 @@ def send_pdf_to_telegram(bot_token, target_chat_id, pdf_bytes, filename, caption
         print(f"❌ Exception uploading PDF: {e}")
 
 def process_telegram_tailor_request(bot_token, job_id, chat_id):
-    print(f"⚡ Processing tailor request for Job ID: {job_id}")
-    job_url = f"https://www.linkedin.com/jobs/view/{job_id}/"
-    job_data, err = fetch_linkedin_job_details(job_url)
-    if err or not job_data:
-        job_data = {"title": "PMO / Project Management Lead", "company": "Target Company", "description": f"Target job ID: {job_id}"}
-    
-    prompt = build_tailoring_prompt(job_data, master_data, aggressiveness=6)
-    tailored_md = generate_tailored_resume_gemini(prompt)
-    if tailored_md.startswith("ERROR:"):
-        requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": f"❌ Tailoring failed: {tailored_md}"}, timeout=10)
-        return
-    
-    pdf_bytes = compile_resume_to_pdf(tailored_md)
-    safe_company = "".join(c for c in job_data["company"] if c.isalnum() or c in (" ", "_")).strip()
-    filename = f"Kevin_George_{safe_company.replace(' ', '_')}_Resume.pdf" if safe_company else "Kevin_George_Resume.pdf"
-    caption = f"🎯 <b>TAILORED RESUME READY</b>\n\n💼 <b>{job_data['title']}</b>\n🏢 {job_data['company']}\n\n🔗 <a href='{job_url}'>Click Here to Apply on LinkedIn</a>"
-    
-    applied_chat = get_secret("APPLIED_CHAT_ID")
-    send_pdf_to_telegram(bot_token, applied_chat if applied_chat else chat_id, pdf_bytes, filename, caption)
+    import traceback
+
+    try:
+        print(f"⚡ Processing tailor request for Job ID: {job_id}", flush=True)
+        job_url = f"https://www.linkedin.com/jobs/view/{job_id}/"
+        job_data, err = fetch_linkedin_job_details(job_url)
+        if err or not job_data:
+            print(f"⚠️ Job fetch failed, using fallback: {err}", flush=True)
+            job_data = {"title": "PMO / Project Management Lead", "company": "Target Company", "description": f"Target job ID: {job_id}"}
+
+        prompt = build_tailoring_prompt(job_data, master_data, aggressiveness=6)
+        tailored_md = generate_tailored_resume_gemini(prompt)
+        if tailored_md.startswith("ERROR:"):
+            print(f"❌ {tailored_md}", flush=True)
+            requests.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": f"❌ Tailoring failed: {tailored_md}"},
+                timeout=10,
+            )
+            return
+
+        pdf_bytes = compile_resume_to_pdf(tailored_md)
+        safe_company = "".join(c for c in job_data["company"] if c.isalnum() or c in (" ", "_")).strip()
+        filename = f"Kevin_George_{safe_company.replace(' ', '_')}_Resume.pdf" if safe_company else "Kevin_George_Resume.pdf"
+        caption = f"🎯 <b>TAILORED RESUME READY</b>\n\n💼 <b>{job_data['title']}</b>\n🏢 {job_data['company']}\n\n🔗 <a href='{job_url}'>Click Here to Apply on LinkedIn</a>"
+
+        applied_chat = get_secret("APPLIED_CHAT_ID")
+        send_pdf_to_telegram(bot_token, applied_chat if applied_chat else chat_id, pdf_bytes, filename, caption)
+    except Exception as e:
+        traceback.print_exc()
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": f"❌ Tailor crashed: {type(e).__name__}: {e}"},
+                timeout=10,
+            )
+        except Exception:
+            pass
 
 def telegram_polling_daemon():
+    import traceback
+
     bot_token = get_secret("TELEGRAM_TOKEN")
     if not bot_token:
-        print("❌ TELEGRAM_TOKEN missing; listener idle.")
+        print("❌ TELEGRAM_TOKEN missing; listener idle.", flush=True)
         return
-    try: requests.get(f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=false", timeout=10)
-    except Exception: pass
-    
+    try:
+        requests.get(
+            f"https://api.telegram.org/bot{bot_token}/deleteWebhook?drop_pending_updates=false",
+            timeout=10,
+        )
+    except Exception:
+        pass
+
     offset = 0
-    print("🚀 Telegram background listener started and actively polling...")
+    print("🚀 Telegram background listener started and actively polling...", flush=True)
     while True:
         try:
-            resp = requests.get(f"https://api.telegram.org/bot{bot_token}/getUpdates?offset={offset}&timeout=20", timeout=25)
+            resp = requests.get(
+                f"https://api.telegram.org/bot{bot_token}/getUpdates",
+                params={
+                    "offset": offset,
+                    "timeout": 20,
+                    "allowed_updates": json.dumps(["message", "callback_query"]),
+                },
+                timeout=25,
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 for update in data.get("result", []):
                     offset = update["update_id"] + 1
-                    
-                    # 1. Catch /ping commands to prove Streamlit is alive
-                    if "message" in update and "text" in update["message"]:
-                        if update["message"]["text"].strip().lower() == "/ping":
-                            chat_id = update["message"]["chat"]["id"]
-                            requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": "🏓 Pong from Streamlit! Listener is alive."})
-                    
-                    # 2. Catch ALL button clicks and echo them to the chat
+                    print("UPDATE:", json.dumps(update)[:500], flush=True)
+
+                    # 1. /ping health check
+                    msg = update.get("message") or {}
+                    if msg.get("text", "").strip().lower() == "/ping":
+                        requests.post(
+                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                            json={"chat_id": msg["chat"]["id"], "text": "🏓 Pong from Streamlit! Listener is alive."},
+                            timeout=10,
+                        )
+
+                    # 2. Button clicks
                     if "callback_query" in update:
                         cb = update["callback_query"]
                         cb_data = cb.get("data", "")
-                        chat_id = cb.get("message", {}).get("chat", {}).get("id") or cb.get("from", {}).get("id")
-                        
-                        # Debug: Send the exact callback data back to Telegram so we can see it
-                        requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={"chat_id": chat_id, "text": f"🛠️ Debug: Button tapped! Hidden data is: '{cb_data}'"})
-                        
+                        chat_id = (cb.get("message") or {}).get("chat", {}).get("id") or cb.get("from", {}).get("id")
+
+                        # Answer FIRST: callback queries expire quickly
+                        if cb_data.startswith("tailor:"):
+                            answer_callback_query(bot_token, cb.get("id"), "⏳ Tailoring resume in background... PDF incoming!")
+                        else:
+                            answer_callback_query(bot_token, cb.get("id"), f"Unrecognized button: {cb_data}")
+
+                        # Debug echo (remove once working)
+                        requests.post(
+                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                            json={"chat_id": chat_id, "text": f"🛠️ Debug: Button tapped! Hidden data is: '{cb_data}'"},
+                            timeout=10,
+                        )
+
                         if cb_data.startswith("tailor:"):
                             job_id = cb_data.split(":", 1)[1]
-                            answer_callback_query(bot_token, cb.get("id"), "⏳ Tailoring resume in background... PDF incoming!")
-                            threading.Thread(target=process_telegram_tailor_request, args=(bot_token, job_id, chat_id), daemon=True).start()
-            elif resp.status_code == 409: time.sleep(10)
-            else: time.sleep(5)
-        except Exception: time.sleep(5)
+                            threading.Thread(
+                                target=process_telegram_tailor_request,
+                                args=(bot_token, job_id, chat_id),
+                                daemon=True,
+                            ).start()
+            elif resp.status_code == 409:
+                print("⚠️ 409 Conflict: another getUpdates consumer is running for this token.", flush=True)
+                time.sleep(10)
+            else:
+                print(f"⚠️ getUpdates HTTP {resp.status_code}: {resp.text[:200]}", flush=True)
+                time.sleep(5)
+        except Exception:
+            traceback.print_exc()
+            time.sleep(5)
 
 class BotRunner:
     def __init__(self):
