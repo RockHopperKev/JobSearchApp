@@ -393,15 +393,14 @@ def telegram_polling_daemon():
                         # Answer FIRST: callback queries expire quickly
                         if cb_data.startswith("tailor:"):
                             answer_callback_query(bot_token, cb.get("id"), "⏳ Tailoring resume in background... PDF incoming!")
+                            job_id = cb_data.split(":", 1)[1]
+                            threading.Thread(
+                                target=process_telegram_tailor_request,
+                                args=(bot_token, job_id, chat_id),
+                                daemon=True,
+                            ).start()
                         else:
                             answer_callback_query(bot_token, cb.get("id"), f"Unrecognized button: {cb_data}")
-
-                        # Debug echo (remove once working)
-                        requests.post(
-                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                            json={"chat_id": chat_id, "text": f"🛠️ Debug: Button tapped! Hidden data is: '{cb_data}'"},
-                            timeout=10,
-                        )
 
                         if cb_data.startswith("tailor:"):
                             job_id = cb_data.split(":", 1)[1]
