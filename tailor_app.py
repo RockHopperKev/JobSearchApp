@@ -394,12 +394,23 @@ with st.expander("🛠️ Telegram Bot & System Diagnostic Panel", expanded=Fals
     c3.metric("Dest Chat ID", chat_dest if chat_dest else "Default")
     c4.metric("Bot Listener Thread", "🟢 Running" if is_alive else "🔴 Stopped")
 
-    if st.button("🧪 Send Test Message to My Applications"):
-        if not t_token: st.error("Cannot test: TELEGRAM_TOKEN is missing in Streamlit secrets.")
+    if st.button("🧪 Send Test Job with Button to My Applications"):
+        if not t_token: 
+            st.error("Cannot test: TELEGRAM_TOKEN is missing.")
         else:
-            test_resp = requests.post(f"https://api.telegram.org/bot{t_token}/sendMessage", json={"chat_id": chat_dest or "0", "text": "✅ Test connection successful!"})
-            if test_resp.status_code == 200: st.success("Message delivered!")
-            else: st.error(f"Telegram Error ({test_resp.status_code}): {test_resp.text}")
+            test_payload = {
+                "chat_id": chat_dest or "0",
+                "text": "🧪 <b>TEST JOB</b>\nTap the button below to see if Streamlit catches it.",
+                "parse_mode": "HTML",
+                "reply_markup": {
+                    "inline_keyboard": [[{"text": "⚡ Tailor & Apply", "callback_data": "tailor:999999999"}]]
+                }
+            }
+            test_resp = requests.post(f"https://api.telegram.org/bot{t_token}/sendMessage", json=test_payload)
+            if test_resp.status_code == 200: 
+                st.success("Test job delivered! Check Telegram.")
+            else: 
+                st.error(f"Telegram Error ({test_resp.status_code}): {test_resp.text}")
 
 if not master_data:
     st.error("Could not find `master_resume.json`.")
