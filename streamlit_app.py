@@ -88,7 +88,9 @@ def fetch_linkedin_jobs(max_pages=2):
     return all_jobs
 
 # Control refresh logic using Streamlit state
-if "jobs" not in st.session_state or st.button("🔄 Refresh Listings", type="primary"):
+refresh = st.button("🔄 Refresh Listings", type="primary")
+
+if "jobs" not in st.session_state or refresh:
     with st.spinner("Fetching latest postings from LinkedIn..."):
         st.session_state.jobs = fetch_linkedin_jobs(max_pages=2)
 
