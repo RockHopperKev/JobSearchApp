@@ -10,7 +10,7 @@ from google import genai
 import requests
 import streamlit as st
 
-BUILD_ID = "2026-11-10-a"
+BUILD_ID = "2026-11-12-a"
 
 st.set_page_config(
     page_title="AI Resume Tailor & ATS Exporter", page_icon="📄", layout="wide"
@@ -140,6 +140,31 @@ STRICT OUTPUT INSTRUCTIONS:
 """
     return system_prompt
 
+PREFERRED_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"]
+SKIP_MODEL_WORDS = ("image", "tts", "audio", "live", "embedding", "robotics", "computer")
+
+def is_transient_error(error_text):
+    t = error_text.upper()
+    return any(k in t for k in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "OVERLOADED", "DEADLINE"))
+
+def get_candidate_models(client):
+    """Preferred models first, then any other text 'flash' models this API key can actually use."""
+    found = []
+    try:
+        for m in client.models.list():
+            name = (getattr(m, "name", "") or "").replace("models/", "")
+            actions = getattr(m, "supported_actions", None) or []
+            if "flash" in name and "generateContent" in actions and not any(w in name for w in SKIP_MODEL_WORDS):
+                found.append(name)
+    except Exception as e:
+        print(f"⚠️ Could not list Gemini models: {e}", flush=True)
+
+    extras = [n for n in found if n not in PREFERRED_MODELS]
+    # Newer names first; lite variants last
+    extras.sort(reverse=True)
+    extras.sort(key=lambda n: "lite" in n)
+    return (PREFERRED_MODELS + extras)[:6]
+
 def generate_tailored_resume_gemini(prompt):
     api_key = get_secret("GEMINI_API_KEY")
     if not api_key:
@@ -149,19 +174,38 @@ def generate_tailored_resume_gemini(prompt):
     except Exception as e:
         return f"ERROR: Failed to initialize Gemini client: {e}"
 
-    candidate_models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
-    errors = []
-    for model_name in candidate_models:
-        try:
-            response = client.models.generate_content(model=model_name, contents=prompt)
-            if response and response.text:
-                print(f"✅ Gemini model used: {model_name}", flush=True)
-                return response.text
-            errors.append(f"{model_name}: empty response")
-        except Exception as e:
-            print(f"⚠️ Gemini model {model_name} failed: {e}", flush=True)
-            errors.append(f"{model_name}: {str(e)[:150]}")
-    return "ERROR: All Gemini models failed. " + " | ".join(errors)
+    candidate_models = get_candidate_models(client)
+    print(f"Gemini models to try: {candidate_models}", flush=True)
+    errors = {}
+    dead_models = set()  # e.g. 404: retrying will never help
+
+    for attempt in range(3):
+        transient_seen = False
+        for model_name in candidate_models:
+            if model_name in dead_models:
+                continue
+            try:
+                response = client.models.generate_content(model=model_name, contents=prompt)
+                if response and response.text:
+                    print(f"✅ Gemini model used: {model_name}", flush=True)
+                    return response.text
+                errors[model_name] = "empty response"
+            except Exception as e:
+                msg = str(e)
+                print(f"⚠️ Gemini model {model_name} failed (attempt {attempt + 1}): {msg[:200]}", flush=True)
+                errors[model_name] = msg[:150]
+                if is_transient_error(msg):
+                    transient_seen = True
+                else:
+                    dead_models.add(model_name)
+        if not transient_seen:
+            break
+        wait = 15 * (attempt + 1)
+        if attempt < 2:
+            print(f"⏳ Models busy; retrying in {wait}s...", flush=True)
+            time.sleep(wait)
+
+    return "ERROR: All Gemini models failed. " + " | ".join(f"{k}: {v}" for k, v in errors.items())
 
 def highlight_changes(base_text: str, tailored_text: str) -> str:
     base_lines = [l.strip() for l in base_text.splitlines() if l.strip()]
