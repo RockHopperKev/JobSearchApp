@@ -10,6 +10,8 @@ from google import genai
 import requests
 import streamlit as st
 
+BUILD_ID = "2026-11-10-a"
+
 st.set_page_config(
     page_title="AI Resume Tailor & ATS Exporter", page_icon="📄", layout="wide"
 )
@@ -146,18 +148,20 @@ def generate_tailored_resume_gemini(prompt):
         client = genai.Client(api_key=api_key)
     except Exception as e:
         return f"ERROR: Failed to initialize Gemini client: {e}"
-    
-    candidate_models = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-    last_error = None
+
+    candidate_models = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
+    errors = []
     for model_name in candidate_models:
         try:
             response = client.models.generate_content(model=model_name, contents=prompt)
             if response and response.text:
+                print(f"✅ Gemini model used: {model_name}", flush=True)
                 return response.text
+            errors.append(f"{model_name}: empty response")
         except Exception as e:
-            last_error = e
-            continue
-    return f"ERROR: Gemini API call failed: {last_error}"
+            print(f"⚠️ Gemini model {model_name} failed: {e}", flush=True)
+            errors.append(f"{model_name}: {str(e)[:150]}")
+    return "ERROR: All Gemini models failed. " + " | ".join(errors)
 
 def highlight_changes(base_text: str, tailored_text: str) -> str:
     base_lines = [l.strip() for l in base_text.splitlines() if l.strip()]
@@ -301,8 +305,17 @@ def send_pdf_to_telegram(bot_token, target_chat_id, pdf_bytes, filename, caption
     except Exception as e:
         print(f"❌ Exception uploading PDF: {e}")
 
+IN_FLIGHT_JOBS = set()
+IN_FLIGHT_LOCK = threading.Lock()
+
 def process_telegram_tailor_request(bot_token, job_id, chat_id):
     import traceback
+
+    with IN_FLIGHT_LOCK:
+        if job_id in IN_FLIGHT_JOBS:
+            print(f"⏭️ Job {job_id} already in progress, skipping duplicate.", flush=True)
+            return
+        IN_FLIGHT_JOBS.add(job_id)
 
     try:
         print(f"⚡ Processing tailor request for Job ID: {job_id}", flush=True)
@@ -340,6 +353,9 @@ def process_telegram_tailor_request(bot_token, job_id, chat_id):
             )
         except Exception:
             pass
+    finally:
+        with IN_FLIGHT_LOCK:
+            IN_FLIGHT_JOBS.discard(job_id)
 
 def telegram_polling_daemon():
     import traceback
@@ -357,7 +373,7 @@ def telegram_polling_daemon():
         pass
 
     offset = 0
-    print("🚀 Telegram background listener started and actively polling...", flush=True)
+    print(f"🚀 Telegram background listener started (build {BUILD_ID}) and actively polling...", flush=True)
     while True:
         try:
             resp = requests.get(
@@ -380,11 +396,11 @@ def telegram_polling_daemon():
                     if msg.get("text", "").strip().lower() == "/ping":
                         requests.post(
                             f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                            json={"chat_id": msg["chat"]["id"], "text": "🏓 Pong from Streamlit! Listener is alive."},
+                            json={"chat_id": msg["chat"]["id"], "text": f"🏓 Pong! Build {BUILD_ID}"},
                             timeout=10,
                         )
 
-                                        # 2. Button clicks
+                    # 2. Button clicks
                     if "callback_query" in update:
                         cb = update["callback_query"]
                         cb_data = cb.get("data", "")
@@ -442,6 +458,7 @@ with st.expander("🛠️ Telegram Bot & System Diagnostic Panel", expanded=Fals
     c2.metric("Telegram Token", "✅ Found" if t_token else "❌ Missing")
     c3.metric("Dest Chat ID", chat_dest if chat_dest else "Default")
     c4.metric("Bot Listener Thread", "🟢 Running" if is_alive else "🔴 Stopped")
+    st.caption(f"Build: {BUILD_ID}")
 
     if st.button("🧪 Send Test Job with Button to My Applications"):
         if not t_token: 
