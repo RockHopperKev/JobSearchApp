@@ -1,3 +1,4 @@
+import html
 import json
 import os
 import re
@@ -11,7 +12,130 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 SEEN_JOBS_FILE = "seen_jobs.txt"
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
+# ---------------------------------------------------------------------------
+# Salary detection
+# ---------------------------------------------------------------------------
+# Matches things like: $120,000 - $150,000 | $120K-$150K | $120-150k |
+# $55/hr | $55.00 - $65.00 per hour | USD $140,000 per year
+SALARY_RE = re.compile(
+    r"""
+    (?:USD\s?)?\$\s?(?P<lo>\d[\d,]*(?:\.\d+)?)\s?(?P<lo_k>[kK])?(?!\w)
+    (?:
+        \s?(?:-|–|—|to)\s?
+        (?:USD\s?)?\$?\s?(?P<hi>\d[\d,]*(?:\.\d+)?)\s?(?P<hi_k>[kK])?(?!\w)
+    )?
+    (?P<unit>
+        \s?(?:/|per\s+)\s?(?:yr|year|hr|hour|annum)\b
+        |\s(?:annually|hourly)\b
+    )?
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# A dollar figure only counts if pay-related wording appears near it.
+# This avoids false positives like "$500,000 project budget".
+SALARY_CONTEXT_RE = re.compile(
+    r"\b(salary|salaries|compensation|pay|wage|wages|earn|earnings|ote|hourly)\b",
+    re.IGNORECASE,
+)
+
+
+def _amount(num, k_suffix):
+    if not num:
+        return None
+    try:
+        value = float(num.replace(",", ""))
+    except ValueError:
+        return None
+    return value * 1000 if k_suffix else value
+
+
+def extract_salary(text):
+    """Finds a salary or pay range in free text. Returns a short string or None."""
+    if not text:
+        return None
+
+    best_single = None
+    for m in SALARY_RE.finditer(text):
+        lo = _amount(m.group("lo"), m.group("lo_k"))
+        hi = _amount(m.group("hi"), m.group("hi_k"))
+        if lo is None:
+            continue
+
+        # Shorthand like "$120-150k": the k applies to both numbers
+        if hi is not None and m.group("hi_k") and not m.group("lo_k") and lo < 1000:
+            lo *= 1000
+
+        unit = (m.group("unit") or "").lower()
+        hourly = "hr" in unit or "hour" in unit
+        values = [v for v in (lo, hi) if v is not None]
+
+        if hourly:
+            plausible = all(10 <= v <= 500 for v in values)
+        else:
+            plausible = all(30000 <= v <= 1000000 for v in values)
+        if not plausible:
+            continue
+
+        window = text[max(0, m.start() - 200): m.end() + 60]
+        if not SALARY_CONTEXT_RE.search(window):
+            continue
+
+        found = re.sub(r"\s+", " ", m.group(0)).strip()
+        if hi is not None:
+            return found  # a full range is the best match
+        if best_single is None:
+            best_single = found
+
+    return best_single
+
+
+def find_salary(job, job_card, headers):
+    """Looks for salary on the search card first, then inside the job posting itself."""
+    # 1. Salary shown directly on the search card (when LinkedIn provides it)
+    if job_card:
+        tag = job_card.find("span", class_="job-search-card__salary-info")
+        if tag and tag.get_text(strip=True):
+            return re.sub(r"\s+", " ", tag.get_text(" ", strip=True))
+
+    # 2. Otherwise open the posting and look for it
+    match = re.search(r"(\d{8,})", job["Link"])
+    if not match:
+        return None
+    api_url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{match.group(1)}"
+    try:
+        resp = requests.get(api_url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"Salary lookup skipped (HTTP {resp.status_code}) for {job['Link']}")
+            return None
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # LinkedIn's own salary field, when the posting has one
+        tag = soup.find(class_="compensation__salary")
+        if tag and tag.get_text(strip=True):
+            return re.sub(r"\s+", " ", tag.get_text(" ", strip=True))
+
+        # Otherwise search the job description text
+        desc = soup.find("div", class_="show-more-less-html__markup")
+        if desc:
+            return extract_salary(desc.get_text(separator="\n", strip=True))
+    except Exception as e:
+        print(f"Salary lookup failed: {e}")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Telegram
+# ---------------------------------------------------------------------------
 def send_telegram_alert(job):
     """Sends a job alert with an interactive in-app callback button."""
     match = re.search(r"(\d{8,})", job["Link"])
@@ -24,8 +148,10 @@ def send_telegram_alert(job):
         f"💼 <b>{job['Title']}</b>\n"
         f"🏢 {job['Company']}\n"
         f"📍 {job['Location']}\n"
-        f"🕒 {job['Posted']}"
     )
+    if job.get("Salary"):
+        message += f"💰 {html.escape(job['Salary'])}\n"
+    message += f"🕒 {job['Posted']}"
 
     # Pass reply_markup directly as a dictionary when using json=payload
     payload = {
@@ -94,14 +220,7 @@ def is_priority(job, job_card):
 
 
 def run_scraper():
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    headers = HEADERS
 
     seen_urls = load_seen_jobs()
     new_jobs_found = False
@@ -173,6 +292,7 @@ def run_scraper():
                         }
 
                         if is_priority(job, job_card):
+                            job["Salary"] = find_salary(job, job_card, headers)
                             send_telegram_alert(job)
                             seen_urls.add(clean_url)
                             new_jobs_found = True
